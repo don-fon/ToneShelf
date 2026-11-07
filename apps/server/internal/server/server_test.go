@@ -1,13 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +18,87 @@ import (
 	"music-player/server/internal/media"
 	"music-player/server/internal/store"
 )
+
+func TestUploadTranscodePlaylistAndRangeFlow(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg is not available")
+	}
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe is not available")
+	}
+	root := t.TempDir()
+	wavPath := filepath.Join(root, "sample.wav")
+	cmd := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "pcm_s16le", wavPath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generate wav: %v: %s", err, output)
+	}
+
+	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	handler := api.Handler()
+
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	filePart, err := form.CreateFormFile("file", "sample.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wav, err := os.Open(wavPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = io.Copy(filePart, wav); err != nil {
+		wav.Close()
+		t.Fatal(err)
+	}
+	if err = wav.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = form.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	uploadRequest := httptest.NewRequest(http.MethodPost, "/api/tracks", &body)
+	uploadRequest.Header.Set("Content-Type", form.FormDataContentType())
+	uploadResponse := httptest.NewRecorder()
+	handler.ServeHTTP(uploadResponse, uploadRequest)
+	if uploadResponse.Code != http.StatusCreated {
+		t.Fatalf("upload status=%d body=%s", uploadResponse.Code, uploadResponse.Body.String())
+	}
+	var track store.Track
+	if err = json.Unmarshal(uploadResponse.Body.Bytes(), &track); err != nil {
+		t.Fatal(err)
+	}
+	storedTrack, err := s.Track(context.Background(), track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if track.ContentType != "audio/mpeg" || filepath.Ext(storedTrack.PlayablePath) != ".mp3" {
+		t.Fatalf("unexpected playable track: %#v", track)
+	}
+
+	playlistResponse := httptest.NewRecorder()
+	handler.ServeHTTP(playlistResponse, httptest.NewRequest(http.MethodGet, "/api/playlists", nil))
+	var playlists []store.Playlist
+	if err = json.Unmarshal(playlistResponse.Body.Bytes(), &playlists); err != nil {
+		t.Fatal(err)
+	}
+	if len(playlists) != 1 || len(playlists[0].Tracks) != 1 || playlists[0].Tracks[0].ID != track.ID {
+		t.Fatalf("uploaded track missing from default playlist: %s", playlistResponse.Body.String())
+	}
+
+	rangeRequest := httptest.NewRequest(http.MethodGet, track.AudioURL, nil)
+	rangeRequest.Header.Set("Range", "bytes=0-31")
+	rangeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(rangeResponse, rangeRequest)
+	if rangeResponse.Code != http.StatusPartialContent || rangeResponse.Body.Len() != 32 {
+		t.Fatalf("range status=%d length=%d", rangeResponse.Code, rangeResponse.Body.Len())
+	}
+}
 
 func TestPlaylistsEndpointUsesEmptyArrays(t *testing.T) {
 	root := t.TempDir()

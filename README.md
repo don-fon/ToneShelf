@@ -30,6 +30,16 @@ Linux / NAS：
 
 开发网页时，可另开终端运行 `npm run dev`，Vite 会把 `/api` 请求转发到 Go 服务。
 
+## 验证
+
+提交前运行完整验证命令：
+
+```powershell
+npm run verify
+```
+
+该命令依次执行 Go 测试与静态检查、共享播放策略和网页回归测试、TypeScript 类型检查以及生产构建。安装了 FFmpeg/ffprobe 时，Go 集成测试还会实际生成 WAV、上传转码并验证 Range 播放链路。
+
 ## 当前已实现
 
 - 音频上传、元数据探测，以及非 MP3 音频同步转为较高质量 MP3。

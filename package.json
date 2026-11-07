@@ -9,6 +9,7 @@
     "build": "npm run build --workspace=@music/web",
     "dev": "npm run dev --workspace=@music/web",
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "verify": "go test ./apps/server/... && go vet ./apps/server/... && npm test && npm run typecheck && npm run build"
   }
 }
