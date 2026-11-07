@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -14,6 +16,120 @@ func openTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+func TestPlaylistLifecycleAndDefaultRemovalConfirmation(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	for _, id := range []string{"track-1", "track-2"} {
+		if _, err := s.InsertTrack(ctx, NewTrack{ID: id, Title: id, OriginalPath: id + ".source", PlayablePath: id + ".mp3", ContentType: "audio/mpeg", SizeBytes: 1, DurationSeconds: 10}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.CreatePlaylist(ctx, "playlist-1", "旧名称"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenamePlaylist(ctx, "playlist-1", "新名称"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTrack(ctx, "playlist-1", "track-1", "item-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTrack(ctx, "playlist-1", "track-2", "item-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReorderPlaylist(ctx, "playlist-1", []string{"track-2", "track-1"}); err != nil {
+		t.Fatal(err)
+	}
+	playlists, err := s.Playlists(ctx)
+	if err != nil || playlists[1].Name != "新名称" || playlists[1].Tracks[0].ID != "track-2" {
+		t.Fatalf("unexpected playlist state: %#v, %v", playlists, err)
+	}
+	if _, err = s.RemoveTrackFromPlaylist(ctx, DefaultPlaylistID, "track-1", false, time.Now()); err != nil {
+		t.Fatal("track with another membership should leave the default playlist without confirmation")
+	}
+	if _, err = s.RemoveTrackFromPlaylist(ctx, "playlist-1", "track-2", false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.RemoveTrackFromPlaylist(ctx, DefaultPlaylistID, "track-2", false, time.Now()); !errors.Is(err, ErrConfirmationRequired) {
+		t.Fatalf("expected confirmation requirement, got %v", err)
+	}
+	deletedAt := time.Date(2026, 11, 8, 1, 2, 3, 0, time.UTC)
+	result, err := s.RemoveTrackFromPlaylist(ctx, DefaultPlaylistID, "track-2", true, deletedAt)
+	if err != nil || !result.TrackDeleted {
+		t.Fatalf("confirmed removal failed: %#v, %v", result, err)
+	}
+	trash, err := s.Trash(ctx)
+	if err != nil || len(trash) != 1 || trash[0].PurgeEligibleAt == nil || *trash[0].PurgeEligibleAt != deletedAt.Add(72*time.Hour).Format(time.RFC3339Nano) {
+		t.Fatalf("unexpected trash: %#v, %v", trash, err)
+	}
+	if err = s.DeletePlaylist(ctx, "playlist-1"); err != nil {
+		t.Fatal(err)
+	}
+	playlists, err = s.Playlists(ctx)
+	if err != nil || len(playlists) != 1 || len(playlists[0].Tracks) != 1 || playlists[0].Tracks[0].ID != "track-1" {
+		t.Fatalf("deleting playlist must preserve active tracks: %#v, %v", playlists, err)
+	}
+}
+
+func TestTrashRestoreAndPurgeBoundary(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	if _, err := s.InsertTrack(ctx, NewTrack{ID: "track-1", Title: "test", OriginalPath: "a", PlayablePath: "b", ContentType: "audio/mpeg", SizeBytes: 2, DurationSeconds: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePlaylist(ctx, "playlist-1", "收藏"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTrack(ctx, "playlist-1", "track-1", "item-1"); err != nil {
+		t.Fatal(err)
+	}
+	deletedAt := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
+	if err := s.SoftDeleteTrack(ctx, "track-1", deletedAt); err != nil {
+		t.Fatal(err)
+	}
+	if candidates, err := s.PurgeCandidates(ctx, deletedAt.Add(72*time.Hour-time.Nanosecond)); err != nil || len(candidates) != 0 {
+		t.Fatalf("track became purgeable too early: %#v, %v", candidates, err)
+	}
+	if candidates, err := s.PurgeCandidates(ctx, deletedAt.Add(72*time.Hour)); err != nil || len(candidates) != 1 {
+		t.Fatalf("track not purgeable at boundary: %#v, %v", candidates, err)
+	}
+	restored, err := s.RestoreTrack(ctx, "track-1", "fallback-item")
+	if err != nil || restored.DeletedAt != nil {
+		t.Fatalf("restore failed: %#v, %v", restored, err)
+	}
+	playlists, _ := s.Playlists(ctx)
+	if len(playlists[0].Tracks) != 1 || len(playlists[1].Tracks) != 1 {
+		t.Fatalf("restore did not preserve memberships: %#v", playlists)
+	}
+}
+
+func TestReplaceTrackPreservesSettingsAndQueuesOldFiles(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	track, err := s.InsertTrack(ctx, NewTrack{ID: "track-1", Title: "old", OriginalPath: "old.src", PlayablePath: "old.mp3", ContentType: "audio/mpeg", SizeBytes: 12, DurationSeconds: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := 9.0
+	if track, err = s.UpdateTrack(ctx, track.ID, 2.5, 8, &end, .6, "lyrics"); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := s.ReplaceTrack(ctx, track.ID, NewTrack{Title: "new", Artist: "artist", OriginalPath: "new.src", PlayablePath: "new.mp3", ContentType: "audio/mpeg", SizeBytes: 20, DurationSeconds: 5}, []PendingFile{{Path: "old.src", SizeBytes: 5}, {Path: "old.mp3", SizeBytes: 7}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced.ID != track.ID || replaced.Title != "new" || replaced.AudioVersion != track.AudioVersion+1 || replaced.BaseRandomWeight != 2.5 || replaced.VolumeRatio != .6 || replaced.Lyrics != "lyrics" || replaced.PlaybackStartSeconds != 0 || replaced.PlaybackEndSeconds != nil {
+		t.Fatalf("replacement lost track state: %#v", replaced)
+	}
+	pending, err := s.PendingFiles(ctx)
+	if err != nil || len(pending) != 2 {
+		t.Fatalf("old files not queued: %#v, %v", pending, err)
+	}
+	used, err := s.Usage(ctx)
+	if err != nil || used != 32 {
+		t.Fatalf("replacement quota must include pending files, used=%d err=%v", used, err)
+	}
 }
 
 func TestDefaultPlaylistAndTrackSettings(t *testing.T) {

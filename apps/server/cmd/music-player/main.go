@@ -34,6 +34,19 @@ func main() {
 	webDir := findWebDir()
 	lyricsClient := lyrics.New(env("MUSIC_LRCLIB_URL", "https://lrclib.net"))
 	api := &appserver.API{Store: s, Media: media.New(root), Lyrics: lyricsClient, Log: log, WebDir: webDir}
+	go func() {
+		api.Maintain(ctx)
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				api.Maintain(ctx)
+			}
+		}
+	}()
 	httpServer := &http.Server{Addr: env("MUSIC_ADDR", "127.0.0.1:8080"), Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()

@@ -5,7 +5,7 @@ import { advanceRecovery, effectiveWeight, selectNext } from './index'
 const track = (id: string, weight = 1): Track => ({
   id, title: id, artist: '', album: '', contentType: 'audio/mpeg', sizeBytes: 1,
   durationSeconds: 10, baseRandomWeight: weight, playbackStartSeconds: 0,
-  playbackEndSeconds: null, volumeRatio: 0.8, lyrics: '', audioUrl: `/audio/${id}`,
+  playbackEndSeconds: null, volumeRatio: 0.8, lyrics: '', audioUrl: `/audio/${id}`, audioVersion: 1,
 })
 describe('weighted random policy', () => {
   it('never immediately repeats when another track exists', () => {

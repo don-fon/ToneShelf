@@ -12,6 +12,10 @@ export interface Track {
   volumeRatio: number
   lyrics: string
   audioUrl: string
+  audioVersion: number
+  deletedAt?: string
+  purgeEligibleAt?: string
+  purgeError?: string
 }
 
 export interface Playlist {

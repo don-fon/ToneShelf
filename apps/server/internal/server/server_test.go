@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"music-player/server/internal/lyrics"
 	"music-player/server/internal/media"
@@ -166,6 +167,152 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 	handler.ServeHTTP(rangeResponse, rangeRequest)
 	if rangeResponse.Code != http.StatusPartialContent || rangeResponse.Body.Len() != 32 {
 		t.Fatalf("range status=%d length=%d", rangeResponse.Code, rangeResponse.Body.Len())
+	}
+
+	oldPaths := []string{storedTrack.OriginalPath, storedTrack.PlayablePath}
+	var invalidBody bytes.Buffer
+	invalidForm := multipart.NewWriter(&invalidBody)
+	invalidPart, err := invalidForm.CreateFormFile("file", "broken.aac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = invalidPart.Write([]byte("not audio"))
+	_ = invalidForm.Close()
+	invalidRequest := httptest.NewRequest(http.MethodPut, "/api/tracks/"+track.ID+"/audio", &invalidBody)
+	invalidRequest.Header.Set("Content-Type", invalidForm.FormDataContentType())
+	invalidResponse := httptest.NewRecorder()
+	handler.ServeHTTP(invalidResponse, invalidRequest)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid replacement status=%d body=%s", invalidResponse.Code, invalidResponse.Body.String())
+	}
+	afterFailure, err := s.Track(context.Background(), track.ID)
+	if err != nil || afterFailure.AudioVersion != track.AudioVersion || afterFailure.PlayablePath != storedTrack.PlayablePath {
+		t.Fatalf("failed replacement changed active audio: %#v, %v", afterFailure, err)
+	}
+	for _, oldPath := range oldPaths {
+		if _, statErr := os.Stat(oldPath); statErr != nil {
+			t.Fatalf("failed replacement removed old audio: %s (%v)", oldPath, statErr)
+		}
+	}
+
+	var replacementBody bytes.Buffer
+	replacementForm := multipart.NewWriter(&replacementBody)
+	replacementPart, err := replacementForm.CreateFormFile("file", "replacement"+filepath.Ext(filename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementSource, err := os.Open(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = io.Copy(replacementPart, replacementSource); err != nil {
+		t.Fatal(err)
+	}
+	_ = replacementSource.Close()
+	if err = replacementForm.Close(); err != nil {
+		t.Fatal(err)
+	}
+	replaceRequest := httptest.NewRequest(http.MethodPut, "/api/tracks/"+track.ID+"/audio", &replacementBody)
+	replaceRequest.Header.Set("Content-Type", replacementForm.FormDataContentType())
+	replaceResponse := httptest.NewRecorder()
+	handler.ServeHTTP(replaceResponse, replaceRequest)
+	if replaceResponse.Code != http.StatusOK {
+		t.Fatalf("replace status=%d body=%s", replaceResponse.Code, replaceResponse.Body.String())
+	}
+	var replaced store.Track
+	if err = json.Unmarshal(replaceResponse.Body.Bytes(), &replaced); err != nil {
+		t.Fatal(err)
+	}
+	if replaced.ID != track.ID || replaced.AudioVersion != 2 || replaced.AudioURL == track.AudioURL {
+		t.Fatalf("replacement identity/version mismatch: %#v", replaced)
+	}
+	for _, oldPath := range oldPaths {
+		if oldPath != "" {
+			if _, statErr := os.Stat(oldPath); !os.IsNotExist(statErr) {
+				t.Fatalf("old audio was not removed immediately: %s (%v)", oldPath, statErr)
+			}
+		}
+	}
+}
+
+func TestPlaylistTrashAndRestoreEndpoints(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	s, err := store.Open(ctx, filepath.Join(root, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	path := filepath.Join(root, "audio.mp3")
+	if err = os.WriteFile(path, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.InsertTrack(ctx, store.NewTrack{ID: "track-1", Title: "test", OriginalPath: path, PlayablePath: path, ContentType: "audio/mpeg", SizeBytes: 5, DurationSeconds: 10}); err != nil {
+		t.Fatal(err)
+	}
+	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	handler := api.Handler()
+
+	conflict := httptest.NewRecorder()
+	handler.ServeHTTP(conflict, httptest.NewRequest(http.MethodDelete, "/api/playlists/"+store.DefaultPlaylistID+"/tracks/track-1", nil))
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), "requiresConfirmation") {
+		t.Fatalf("missing confirmation response: status=%d body=%s", conflict.Code, conflict.Body.String())
+	}
+	deleted := httptest.NewRecorder()
+	handler.ServeHTTP(deleted, httptest.NewRequest(http.MethodDelete, "/api/playlists/"+store.DefaultPlaylistID+"/tracks/track-1?confirmDelete=true", nil))
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+	trash := httptest.NewRecorder()
+	handler.ServeHTTP(trash, httptest.NewRequest(http.MethodGet, "/api/trash", nil))
+	if trash.Code != http.StatusOK || !strings.Contains(trash.Body.String(), "track-1") {
+		t.Fatalf("trash status=%d body=%s", trash.Code, trash.Body.String())
+	}
+	restored := httptest.NewRecorder()
+	handler.ServeHTTP(restored, httptest.NewRequest(http.MethodPost, "/api/tracks/track-1/restore", nil))
+	if restored.Code != http.StatusOK {
+		t.Fatalf("restore status=%d body=%s", restored.Code, restored.Body.String())
+	}
+	playlists, err := s.Playlists(ctx)
+	if err != nil || len(playlists[0].Tracks) != 1 {
+		t.Fatalf("restored track missing: %#v, %v", playlists, err)
+	}
+}
+
+func TestMaintenanceRetainsFailedPurgeAndRetries(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	s, err := store.Open(ctx, filepath.Join(root, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	blocked := filepath.Join(root, "blocked")
+	if err = os.Mkdir(blocked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(blocked, "child"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.InsertTrack(ctx, store.NewTrack{ID: "track-1", Title: "test", OriginalPath: blocked, PlayablePath: blocked, ContentType: "audio/mpeg", SizeBytes: 1, DurationSeconds: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SoftDeleteTrack(ctx, "track-1", time.Now().Add(-73*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	api := &API{Store: s, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api.Maintain(ctx)
+	trash, err := s.Trash(ctx)
+	if err != nil || len(trash) != 1 || trash[0].PurgeError == "" {
+		t.Fatalf("failed purge must remain retryable: %#v, %v", trash, err)
+	}
+	if err = os.Remove(filepath.Join(blocked, "child")); err != nil {
+		t.Fatal(err)
+	}
+	api.Maintain(ctx)
+	trash, err = s.Trash(ctx)
+	if err != nil || len(trash) != 0 {
+		t.Fatalf("retry did not complete purge: %#v, %v", trash, err)
 	}
 }
 

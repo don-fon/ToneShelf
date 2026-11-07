@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -29,6 +30,8 @@ type API struct {
 	Lyrics *lyrics.Client
 	Log    *slog.Logger
 	WebDir string
+
+	maintenanceMu sync.Mutex
 }
 
 func (a *API) Handler() http.Handler {
@@ -39,9 +42,17 @@ func (a *API) Handler() http.Handler {
 	})
 	r.Get("/api/playlists", a.playlists)
 	r.Post("/api/playlists", a.createPlaylist)
+	r.Patch("/api/playlists/{playlistID}", a.renamePlaylist)
+	r.Delete("/api/playlists/{playlistID}", a.deletePlaylist)
 	r.Post("/api/playlists/{playlistID}/tracks/{trackID}", a.addTrack)
+	r.Delete("/api/playlists/{playlistID}/tracks/{trackID}", a.removeTrack)
+	r.Put("/api/playlists/{playlistID}/tracks/order", a.reorderPlaylist)
 	r.Post("/api/tracks", a.upload)
 	r.Patch("/api/tracks/{trackID}", a.updateTrack)
+	r.Delete("/api/tracks/{trackID}", a.deleteTrack)
+	r.Put("/api/tracks/{trackID}/audio", a.replaceAudio)
+	r.Post("/api/tracks/{trackID}/restore", a.restoreTrack)
+	r.Get("/api/trash", a.trash)
 	r.Get("/api/tracks/{trackID}/lyrics/search", a.searchLyrics)
 	r.Get("/api/tracks/{trackID}/audio", a.audio)
 	r.Get("/api/quota", a.quota)
@@ -49,6 +60,58 @@ func (a *API) Handler() http.Handler {
 		r.Handle("/*", spaHandler(a.WebDir))
 	}
 	return r
+}
+
+func (a *API) renamePlaylist(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := a.Store.RenamePlaylist(r.Context(), chi.URLParam(r, "playlistID"), in.Name); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) deletePlaylist(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.DeletePlaylist(r.Context(), chi.URLParam(r, "playlistID")); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) reorderPlaylist(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TrackIDs []string `json:"trackIds"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := a.Store.ReorderPlaylist(r.Context(), chi.URLParam(r, "playlistID"), in.TrackIDs); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) removeTrack(w http.ResponseWriter, r *http.Request) {
+	confirmDelete, _ := strconv.ParseBool(r.URL.Query().Get("confirmDelete"))
+	result, err := a.Store.RemoveTrackFromPlaylist(r.Context(), chi.URLParam(r, "playlistID"), chi.URLParam(r, "trackID"), confirmDelete, time.Now())
+	if errors.Is(err, store.ErrConfirmationRequired) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "歌曲只属于默认歌单，移除后将进入回收站", "requiresConfirmation": true})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *API) searchLyrics(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +231,82 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, t)
 }
 
+func (a *API) replaceAudio(w http.ResponseWriter, r *http.Request) {
+	track, err := a.Store.Track(r.Context(), chi.URLParam(r, "trackID"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	used, err := a.Store.Usage(r.Context())
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	if used >= QuotaBytes {
+		writeError(w, http.StatusInsufficientStorage, errors.New("存储空间已满"))
+		return
+	}
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	part, err := filePart(mr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	defer part.Close()
+	result, err := a.Media.Prepare(r.Context(), part.FileName(), io.LimitReader(part, QuotaBytes-used+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if result.SizeBytes > QuotaBytes-used {
+		media.Remove(result)
+		writeError(w, http.StatusInsufficientStorage, errors.New("文件超过剩余空间"))
+		return
+	}
+	replaced, err := a.Store.ReplaceTrack(r.Context(), track.ID, store.NewTrack{Title: result.Title, Artist: result.Artist, Album: result.Album, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds}, storedFiles(track))
+	if err != nil {
+		media.Remove(result)
+		a.fail(w, err)
+		return
+	}
+	// Replacement is already visible. Cleanup is retried persistently if the
+	// old version cannot be removed immediately.
+	a.Maintain(r.Context())
+	writeJSON(w, http.StatusOK, replaced)
+}
+
+func (a *API) deleteTrack(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.SoftDeleteTrack(r.Context(), chi.URLParam(r, "trackID"), time.Now()); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	a.Maintain(r.Context())
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) trash(w http.ResponseWriter, r *http.Request) {
+	tracks, err := a.Store.Trash(r.Context())
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tracks)
+}
+
+func (a *API) restoreTrack(w http.ResponseWriter, r *http.Request) {
+	itemID, _ := newID()
+	track, err := a.Store.RestoreTrack(r.Context(), chi.URLParam(r, "trackID"), itemID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, track)
+}
+
 func (a *API) updateTrack(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		BaseRandomWeight     float64  `json:"baseRandomWeight"`
@@ -219,8 +358,36 @@ func (a *API) quota(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int64{"usedBytes": used, "limitBytes": QuotaBytes, "remainingBytes": QuotaBytes - used})
 }
 func (a *API) fail(w http.ResponseWriter, err error) {
-	a.Log.Error("request failed", "error", err)
+	if a.Log != nil {
+		a.Log.Error("request failed", "error", err)
+	}
 	writeError(w, http.StatusInternalServerError, errors.New("服务器内部错误"))
+}
+
+func storedFiles(track store.Track) []store.PendingFile {
+	seen := make(map[string]bool)
+	files := make([]store.PendingFile, 0, 2)
+	for _, path := range []string{track.OriginalPath, track.PlayablePath} {
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		var size int64
+		if info, err := os.Stat(path); err == nil {
+			size = info.Size()
+		}
+		files = append(files, store.PendingFile{Path: path, SizeBytes: size})
+	}
+	var accounted int64
+	for _, file := range files {
+		accounted += file.SizeBytes
+	}
+	if len(files) > 0 && accounted < track.SizeBytes {
+		// Keep the old version fully charged until cleanup even when one file
+		// cannot be stat'ed (for example because it is temporarily locked).
+		files[0].SizeBytes += track.SizeBytes - accounted
+	}
+	return files
 }
 
 func filePart(mr *multipart.Reader) (*multipart.Part, error) {
