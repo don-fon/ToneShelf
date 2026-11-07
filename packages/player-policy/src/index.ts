@@ -1,5 +1,7 @@
 import type { Track } from '@music/domain'
 
+export * from './lyrics'
+
 export type RecoveryState = Record<string, number>
 
 export function effectiveWeight(track: Track, recovery: RecoveryState): number {

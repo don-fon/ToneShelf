@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Track } from '@music/domain'
 import { advanceRecovery, selectNext } from '@music/player-policy'
 import { api } from './api'
+import { LyricsView } from './LyricsView'
 import { WebAudioEngine } from './platform/audio'
 import { usePlayer } from './player-store'
 
@@ -30,7 +31,8 @@ export function App() {
     const audio = engine.element()
     const start = current.playbackStartSeconds
     const end = current.playbackEndSeconds ?? current.durationSeconds
-    if (player.position >= start && player.position < end) engine.seek(player.position); else engine.seek(start)
+    const target = player.position >= start && player.position < end ? player.position : start
+    engine.seek(target); setPosition(target)
     if (player.playing) engine.play().catch(() => player.setPlaying(false))
     else engine.pause()
   }, [current?.id, player.playing, player.masterVolume, current?.volumeRatio])
@@ -90,6 +92,7 @@ export function App() {
         {!active?.tracks.length && <div className="empty"><b>这里还没有音乐</b><span>上传一个音频文件开始播放</span></div>}
       </section>
       {active && !active.isDefault && library.length > 0 && <details className="add"><summary>从音乐库添加歌曲</summary>{library.filter((t) => !active.tracks.some((x) => x.id === t.id)).map((t) => <button key={t.id} onClick={() => api.addTrack(active.id,t.id).then(refresh)}>＋ {t.title}</button>)}</details>}
+      <LyricsView trackTitle={current?.title} lyrics={current?.lyrics ?? ''} position={position} onSeek={(seconds) => { engine.seek(seconds); setPosition(seconds); player.setPosition(seconds) }}/>
     </main>
     {editing && <div className="modal"><form onSubmit={(e) => { e.preventDefault(); save.mutate(editing) }}>
       <h2>歌曲设置</h2><p>{editing.title}</p>
