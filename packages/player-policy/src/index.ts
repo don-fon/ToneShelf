@@ -30,10 +30,19 @@ export function selectNext(
   }
   return weighted.at(-1)?.track ?? null
 }
-
 export function advanceRecovery(recovery: RecoveryState, nextID: string): RecoveryState {
   const next: RecoveryState = {}
   for (const [id, steps] of Object.entries(recovery)) next[id] = Math.min(3, steps + 1)
   next[nextID] = 0
   return next
+}
+export function sortTracks(tracks: Track[], field: 'uploadedAt' | 'fileName', direction: 'asc' | 'desc'): Track[] {
+  const factor = direction === 'asc' ? 1 : -1
+  const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' })
+  return [...tracks].sort((a, b) => {
+    const compared = field === 'uploadedAt'
+      ? Date.parse(a.uploadedAt) - Date.parse(b.uploadedAt)
+      : collator.compare(a.fileName, b.fileName)
+    return factor * (compared || a.id.localeCompare(b.id))
+  })
 }

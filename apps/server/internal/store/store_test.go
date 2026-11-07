@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/pressly/goose/v3"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -16,6 +18,80 @@ func openTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+func TestDisplayMigrationBackfillsLegacyTracks(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = goose.DownTo(s.db, ".", 2); err != nil {
+		_ = s.Close()
+		t.Fatal(err)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO tracks(id,owner_user_id,title,original_path,playable_path,size_bytes,duration_seconds,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+		"legacy", DefaultUserID, "历史名称", "a", "a", 1, 10, "2026-11-01T00:00:00Z", "2026-11-01T00:00:00Z")
+	if err != nil {
+		_ = s.Close()
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	track, err := s.Track(ctx, "legacy")
+	if err != nil || track.FileName != "历史名称" || track.UploadedAt != "2026-11-01T00:00:00Z" {
+		t.Fatalf("migrated=%#v err=%v", track, err)
+	}
+}
+
+func TestEditableIdentityPersistsAcrossReplacementAndRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "identity.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	original, err := s.InsertTrack(ctx, NewTrack{ID: "editable", Title: "embedded title", Artist: "embedded artist", FileName: "source.aac", OriginalPath: "a", PlayablePath: "b", SizeBytes: 1, DurationSeconds: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title, artist := " 我的歌 ", " 我的歌手 "
+	updated, err := s.UpdateTrack(ctx, original.ID, 1, 0, nil, .8, "lyrics", &title, &artist)
+	if err != nil || updated.Title != "我的歌" || updated.Artist != "我的歌手" {
+		t.Fatalf("identity=%#v err=%v", updated, err)
+	}
+	blank := "  "
+	if _, err = s.UpdateTrack(ctx, original.ID, 1, 0, nil, .8, "", &blank, nil); err == nil {
+		t.Fatal("blank title accepted")
+	}
+	replaced, err := s.ReplaceTrack(ctx, original.ID, NewTrack{Title: "new embedded title", Artist: "new embedded artist", FileName: "replacement.mp3", OriginalPath: "c", PlayablePath: "c", SizeBytes: 2, DurationSeconds: 12}, nil)
+	if err != nil || replaced.Title != "我的歌" || replaced.Artist != "我的歌手" || replaced.FileName != "replacement.mp3" || replaced.UploadedAt != original.UploadedAt {
+		t.Fatalf("replacement=%#v err=%v", replaced, err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := s.Track(ctx, original.ID)
+	if err != nil || reloaded.Title != replaced.Title || reloaded.Artist != replaced.Artist || reloaded.UploadedAt != original.UploadedAt {
+		t.Fatalf("reloaded=%#v err=%v", reloaded, err)
+	}
+	artist = ""
+	cleared, err := s.UpdateTrack(ctx, original.ID, 1, 0, nil, .8, "lyrics", nil, &artist)
+	if err != nil || cleared.Artist != "" {
+		t.Fatalf("clear artist=%#v err=%v", cleared, err)
+	}
 }
 
 func TestPlaylistLifecycleAndDefaultRemovalConfirmation(t *testing.T) {
@@ -38,11 +114,8 @@ func TestPlaylistLifecycleAndDefaultRemovalConfirmation(t *testing.T) {
 	if err := s.AddTrack(ctx, "playlist-1", "track-2", "item-2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReorderPlaylist(ctx, "playlist-1", []string{"track-2", "track-1"}); err != nil {
-		t.Fatal(err)
-	}
 	playlists, err := s.Playlists(ctx)
-	if err != nil || playlists[1].Name != "新名称" || playlists[1].Tracks[0].ID != "track-2" {
+	if err != nil || playlists[1].Name != "新名称" || playlists[1].Tracks[0].ID != "track-1" {
 		t.Fatalf("unexpected playlist state: %#v, %v", playlists, err)
 	}
 	if _, err = s.RemoveTrackFromPlaylist(ctx, DefaultPlaylistID, "track-1", false, time.Now()); err != nil {

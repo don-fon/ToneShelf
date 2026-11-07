@@ -46,7 +46,6 @@ func (a *API) Handler() http.Handler {
 	r.Delete("/api/playlists/{playlistID}", a.deletePlaylist)
 	r.Post("/api/playlists/{playlistID}/tracks/{trackID}", a.addTrack)
 	r.Delete("/api/playlists/{playlistID}/tracks/{trackID}", a.removeTrack)
-	r.Put("/api/playlists/{playlistID}/tracks/order", a.reorderPlaylist)
 	r.Post("/api/tracks", a.upload)
 	r.Patch("/api/tracks/{trackID}", a.updateTrack)
 	r.Delete("/api/tracks/{trackID}", a.deleteTrack)
@@ -79,21 +78,6 @@ func (a *API) renamePlaylist(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) deletePlaylist(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.DeletePlaylist(r.Context(), chi.URLParam(r, "playlistID")); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (a *API) reorderPlaylist(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		TrackIDs []string `json:"trackIds"`
-	}
-	if err := decodeJSON(r, &in); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := a.Store.ReorderPlaylist(r.Context(), chi.URLParam(r, "playlistID"), in.TrackIDs); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -222,7 +206,7 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInsufficientStorage, errors.New("文件超过剩余空间"))
 		return
 	}
-	t, err := a.Store.InsertTrack(r.Context(), store.NewTrack{ID: result.ID, Title: result.Title, Artist: result.Artist, Album: result.Album, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds})
+	t, err := a.Store.InsertTrack(r.Context(), store.NewTrack{ID: result.ID, Title: result.Title, Artist: result.Artist, Album: result.Album, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, FileName: part.FileName(), SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds})
 	if err != nil {
 		media.Remove(result)
 		a.fail(w, err)
@@ -267,7 +251,7 @@ func (a *API) replaceAudio(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInsufficientStorage, errors.New("文件超过剩余空间"))
 		return
 	}
-	replaced, err := a.Store.ReplaceTrack(r.Context(), track.ID, store.NewTrack{Title: result.Title, Artist: result.Artist, Album: result.Album, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds}, storedFiles(track))
+	replaced, err := a.Store.ReplaceTrack(r.Context(), track.ID, store.NewTrack{Title: result.Title, Artist: result.Artist, Album: result.Album, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, FileName: part.FileName(), SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds}, storedFiles(track))
 	if err != nil {
 		media.Remove(result)
 		a.fail(w, err)
@@ -309,6 +293,8 @@ func (a *API) restoreTrack(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) updateTrack(w http.ResponseWriter, r *http.Request) {
 	var in struct {
+		Title                *string  `json:"title"`
+		Artist               *string  `json:"artist"`
 		BaseRandomWeight     float64  `json:"baseRandomWeight"`
 		PlaybackStartSeconds float64  `json:"playbackStartSeconds"`
 		PlaybackEndSeconds   *float64 `json:"playbackEndSeconds"`
@@ -319,7 +305,7 @@ func (a *API) updateTrack(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	t, err := a.Store.UpdateTrack(r.Context(), chi.URLParam(r, "trackID"), in.BaseRandomWeight, in.PlaybackStartSeconds, in.PlaybackEndSeconds, in.VolumeRatio, in.Lyrics)
+	t, err := a.Store.UpdateTrack(r.Context(), chi.URLParam(r, "trackID"), in.BaseRandomWeight, in.PlaybackStartSeconds, in.PlaybackEndSeconds, in.VolumeRatio, in.Lyrics, in.Title, in.Artist)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

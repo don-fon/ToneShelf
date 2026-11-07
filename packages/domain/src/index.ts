@@ -12,6 +12,8 @@ export interface Track {
   volumeRatio: number
   lyrics: string
   audioUrl: string
+  fileName: string
+  uploadedAt: string
   audioVersion: number
   deletedAt?: string
   purgeEligibleAt?: string

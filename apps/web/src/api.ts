@@ -27,6 +27,8 @@ export const api = {
   },
   updateTrack: (track: Track) => request<Track>(`/api/tracks/${track.id}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      title: track.title,
+      artist: track.artist,
       baseRandomWeight: track.baseRandomWeight,
       playbackStartSeconds: track.playbackStartSeconds,
       playbackEndSeconds: track.playbackEndSeconds,
@@ -44,9 +46,6 @@ export const api = {
   deletePlaylist: (playlistID: string) => request<void>(`/api/playlists/${playlistID}`, { method: 'DELETE' }),
   addTrack: (playlistID: string, trackID: string) => request<void>(`/api/playlists/${playlistID}/tracks/${trackID}`, { method: 'POST' }),
   removeTrack: (playlistID: string, trackID: string, confirmDelete = false) => request<{ trackDeleted: boolean }>(`/api/playlists/${playlistID}/tracks/${trackID}?confirmDelete=${confirmDelete}`, { method: 'DELETE' }),
-  reorderPlaylist: (playlistID: string, trackIds: string[]) => request<void>(`/api/playlists/${playlistID}/tracks/order`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackIds }),
-  }),
   deleteTrack: (trackID: string) => request<void>(`/api/tracks/${trackID}`, { method: 'DELETE' }),
   trash: async () => (await request<Track[] | null>('/api/trash')) ?? [],
   restoreTrack: (trackID: string) => request<Track>(`/api/tracks/${trackID}/restore`, { method: 'POST' }),

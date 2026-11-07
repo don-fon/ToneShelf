@@ -390,6 +390,24 @@ func TestTrackUpdateRejectsInvalidRange(t *testing.T) {
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
 	}
+	for _, test := range []struct {
+		title  string
+		status int
+	}{
+		{title: "新名称", status: http.StatusOK},
+		{title: "  ", status: http.StatusBadRequest},
+	} {
+		payload, _ := json.Marshal(map[string]any{"title": test.title, "artist": "新歌手", "baseRandomWeight": 1, "playbackStartSeconds": 0, "playbackEndSeconds": nil, "volumeRatio": .8, "lyrics": ""})
+		response := httptest.NewRecorder()
+		api.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/api/tracks/track-1", bytes.NewReader(payload)))
+		if response.Code != test.status {
+			t.Fatalf("identity update status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	stored, err := s.Track(context.Background(), "track-1")
+	if err != nil || stored.Title != "新名称" || stored.Artist != "新歌手" {
+		t.Fatalf("identity=%#v err=%v", stored, err)
+	}
 }
 
 func TestWebClientAndSPAFallback(t *testing.T) {
