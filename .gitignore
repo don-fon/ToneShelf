@@ -1,0 +1,26 @@
+# Runtime data
+.data/
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Go
+bin/
+coverage.out
+.cache/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Environment and logs
+.env
+*.log
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

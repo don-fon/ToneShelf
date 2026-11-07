@@ -1,0 +1,27 @@
+{
+  "name": "@music/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader runner",
+    "build": "tsc -p tsconfig.app.json --noEmit && vite build --configLoader runner",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@music/domain": "*",
+    "@music/player-policy": "*",
+    "@tanstack/react-query": "^5.90.10",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2",
+    "vitest": "^4.0.8"
+  }
+}

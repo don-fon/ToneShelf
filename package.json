@@ -1,0 +1,14 @@
+{
+  "name": "music-player",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@music/web",
+    "dev": "npm run dev --workspace=@music/web",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
