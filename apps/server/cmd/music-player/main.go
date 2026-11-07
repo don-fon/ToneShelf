@@ -34,7 +34,17 @@ func main() {
 	webDir := findWebDir()
 	lyricsClient := lyrics.New(env("MUSIC_LRCLIB_URL", "https://lrclib.net"))
 	api := &appserver.API{Store: s, Media: media.New(root), Lyrics: lyricsClient, Log: log, WebDir: webDir}
+	if err = api.RecoverJobs(ctx); err != nil {
+		log.Error("recover upload jobs", "error", err)
+		return
+	}
+	jobsDone := make(chan struct{})
+	go func() { defer close(jobsDone); api.RunJobs(ctx) }()
+	defer func() { stop(); <-jobsDone }()
+	maintenanceDone := make(chan struct{})
+	defer func() { stop(); <-maintenanceDone }()
 	go func() {
+		defer close(maintenanceDone)
 		api.Maintain(ctx)
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
@@ -48,17 +58,22 @@ func main() {
 		}
 	}()
 	httpServer := &http.Server{Addr: env("MUSIC_ADDR", "127.0.0.1:8080"), Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = httpServer.Shutdown(shutdownCtx)
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			_ = httpServer.Close()
+		}
 	}()
 	log.Info("music player started", "address", httpServer.Addr, "data", root, "web", webDir)
 	if err = httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Error("server stopped", "error", err)
-		os.Exit(1)
 	}
+	stop()
+	<-shutdownDone
 }
 
 func findWebDir() string {

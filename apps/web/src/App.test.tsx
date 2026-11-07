@@ -12,6 +12,7 @@ const track: Track = {
 }
 
 vi.mock('./api', () => ({ api: {
+  jobs: vi.fn().mockResolvedValue([]),
   playlists: vi.fn().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]),
   quota: vi.fn().mockResolvedValue({ usedBytes: 0, limitBytes: 10 * 1024 ** 3, remainingBytes: 10 * 1024 ** 3 }),
   trash: vi.fn().mockResolvedValue([]),

@@ -25,3 +25,22 @@
 .playlist-title{display:flex;align-items:baseline;gap:14px}
 .playlist-title h1{min-width:0;overflow-wrap:anywhere}
 .track-count{flex-shrink:0;color:#8b837b;font-size:14px;white-space:nowrap}
+.upload-input{display:none}
+.upload-tasks{margin:14px 0;border:1px solid #e0dcd5;border-radius:8px;background:#fffcf8;padding:10px 14px}
+.upload-tasks summary{cursor:pointer;font-size:13px;color:#6f6760}
+.upload-tasks summary span{color:#a39b93;margin-left:6px}
+.upload-task-list{max-height:220px;overflow:auto;margin-top:8px}
+.upload-task{display:flex;justify-content:space-between;align-items:baseline;gap:16px;border-top:1px solid #eee8df;padding:8px 0;font-size:13px}
+.upload-task>span{min-width:0;overflow-wrap:anywhere}
+.upload-task small{color:#918981}
+.upload-task .error{color:#b7432c}
+@media(max-width:800px){.upload-task{display:grid;gap:3px}}
+.sidebar-status{margin-top:auto;min-width:0;flex-shrink:0;padding-top:16px}
+.sidebar-status .quota{margin-top:0;padding:10px 12px}
+.sidebar-status .upload-tasks{margin:0 0 8px;padding:10px 12px;background:#332e2a;border-color:#49423d}
+.sidebar-status .upload-tasks summary{color:#ded8d1}
+.sidebar-status .upload-task-list{max-height:min(180px,25vh)}
+.sidebar-status .upload-task{display:grid;gap:3px;border-color:#49423d;font-size:12px;color:#ded8d1}
+.sidebar-status .upload-task small{color:#aaa29a}
+.sidebar-status .upload-task .error,.sidebar-status .upload-tasks>.error{color:#f09680}
+@media(max-width:800px){.sidebar-status{position:fixed;z-index:6;left:12px;bottom:134px;width:min(260px,calc(100vw - 24px));padding:6px;background:#282522;border:1px solid #49423d;border-radius:10px;box-shadow:0 6px 20px #0002}.sidebar-status .quota{display:grid;padding:5px 6px 2px;gap:3px}.sidebar-status .upload-tasks{margin-bottom:4px}.sidebar-status .upload-task-list{max-height:18vh}}

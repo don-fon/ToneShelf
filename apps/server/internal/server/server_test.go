@@ -133,11 +133,16 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 	uploadRequest.Header.Set("Content-Type", form.FormDataContentType())
 	uploadResponse := httptest.NewRecorder()
 	handler.ServeHTTP(uploadResponse, uploadRequest)
-	if uploadResponse.Code != http.StatusCreated {
+	if uploadResponse.Code != http.StatusAccepted {
 		t.Fatalf("upload status=%d body=%s", uploadResponse.Code, uploadResponse.Body.String())
 	}
-	var track store.Track
-	if err = json.Unmarshal(uploadResponse.Body.Bytes(), &track); err != nil {
+	var queued store.UploadJob
+	if err = json.Unmarshal(uploadResponse.Body.Bytes(), &queued); err != nil {
+		t.Fatal(err)
+	}
+	job := finishTestJob(t, api, queued.ID, "succeeded")
+	track, err := s.Track(context.Background(), job.TrackID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	storedTrack, err := s.Track(context.Background(), track.ID)
@@ -182,9 +187,13 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 	invalidRequest.Header.Set("Content-Type", invalidForm.FormDataContentType())
 	invalidResponse := httptest.NewRecorder()
 	handler.ServeHTTP(invalidResponse, invalidRequest)
-	if invalidResponse.Code != http.StatusBadRequest {
+	if invalidResponse.Code != http.StatusAccepted {
 		t.Fatalf("invalid replacement status=%d body=%s", invalidResponse.Code, invalidResponse.Body.String())
 	}
+	if err = json.Unmarshal(invalidResponse.Body.Bytes(), &queued); err != nil {
+		t.Fatal(err)
+	}
+	finishTestJob(t, api, queued.ID, "failed")
 	afterFailure, err := s.Track(context.Background(), track.ID)
 	if err != nil || afterFailure.AudioVersion != track.AudioVersion || afterFailure.PlayablePath != storedTrack.PlayablePath {
 		t.Fatalf("failed replacement changed active audio: %#v, %v", afterFailure, err)
@@ -216,11 +225,15 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 	replaceRequest.Header.Set("Content-Type", replacementForm.FormDataContentType())
 	replaceResponse := httptest.NewRecorder()
 	handler.ServeHTTP(replaceResponse, replaceRequest)
-	if replaceResponse.Code != http.StatusOK {
+	if replaceResponse.Code != http.StatusAccepted {
 		t.Fatalf("replace status=%d body=%s", replaceResponse.Code, replaceResponse.Body.String())
 	}
-	var replaced store.Track
-	if err = json.Unmarshal(replaceResponse.Body.Bytes(), &replaced); err != nil {
+	if err = json.Unmarshal(replaceResponse.Body.Bytes(), &queued); err != nil {
+		t.Fatal(err)
+	}
+	job = finishTestJob(t, api, queued.ID, "succeeded")
+	replaced, err := s.Track(context.Background(), job.TrackID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if replaced.ID != track.ID || replaced.AudioVersion != 2 || replaced.AudioURL == track.AudioURL {
@@ -432,4 +445,36 @@ func TestWebClientAndSPAFallback(t *testing.T) {
 			t.Fatalf("path=%s status=%d body=%s", path, res.Code, res.Body.String())
 		}
 	}
+}
+func finishTestJob(t *testing.T, api *API, id, state string) store.UploadJob {
+	t.Helper()
+	jobs, err := api.Store.Jobs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range jobs {
+		if job.ID != id {
+			continue
+		}
+		if job.State == "queued" {
+			if err = api.Store.SetJobState(context.Background(), id, "queued", "processing", ""); err != nil {
+				t.Fatal(err)
+			}
+			api.processJob(context.Background(), job)
+		}
+	}
+	jobs, err = api.Store.Jobs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range jobs {
+		if job.ID == id {
+			if job.State != state {
+				t.Fatalf("job state=%s want=%s error=%s", job.State, state, job.Error)
+			}
+			return job
+		}
+	}
+	t.Fatal("job not found")
+	return store.UploadJob{}
 }

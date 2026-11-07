@@ -14,6 +14,15 @@ func (a *API) Maintain(ctx context.Context) {
 	a.maintenanceMu.Lock()
 	defer a.maintenanceMu.Unlock()
 
+	jobs, jobErr := a.Store.Jobs(ctx)
+	if jobErr != nil {
+		a.logMaintenance("list failed uploads", jobErr)
+	}
+	for _, job := range jobs {
+		if job.State == "failed" && job.ReservedBytes > 0 {
+			a.cleanFailedJob(ctx, job)
+		}
+	}
 	pending, err := a.Store.PendingFiles(ctx)
 	if err != nil {
 		a.logMaintenance("list pending files", err)

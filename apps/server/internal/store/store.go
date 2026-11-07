@@ -189,27 +189,35 @@ func (s *Store) Track(ctx context.Context, id string) (Track, error) {
 }
 
 func (s *Store) InsertTrack(ctx context.Context, n NewTrack) (Track, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Track{}, err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO tracks(id,owner_user_id,title,artist,album,original_path,playable_path,content_type,size_bytes,duration_seconds,file_name,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, n.ID, DefaultUserID, n.Title, n.Artist, n.Album, n.OriginalPath, n.PlayablePath, n.ContentType, n.SizeBytes, n.DurationSeconds, n.FileName, now, now)
-	if err != nil {
-		return Track{}, err
-	}
-	var pos int
-	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),-1)+1 FROM playlist_items WHERE playlist_id=?`, DefaultPlaylistID).Scan(&pos); err != nil {
-		return Track{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO playlist_items(id,playlist_id,track_id,position,created_at) VALUES(?,?,?,?,?)`, n.ID+"-default", DefaultPlaylistID, n.ID, pos, now); err != nil {
+	if err = insertTrackTx(ctx, tx, n); err != nil {
 		return Track{}, err
 	}
 	if err = tx.Commit(); err != nil {
 		return Track{}, err
 	}
 	return s.Track(ctx, n.ID)
+}
+
+func insertTrackTx(ctx context.Context, tx *sql.Tx, n NewTrack) error {
+	now := nowText()
+	var err error
+	_, err = tx.ExecContext(ctx, `INSERT INTO tracks(id,owner_user_id,title,artist,album,original_path,playable_path,content_type,size_bytes,duration_seconds,file_name,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, n.ID, DefaultUserID, n.Title, n.Artist, n.Album, n.OriginalPath, n.PlayablePath, n.ContentType, n.SizeBytes, n.DurationSeconds, n.FileName, now, now)
+	if err != nil {
+		return err
+	}
+	var pos int
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),-1)+1 FROM playlist_items WHERE playlist_id=?`, DefaultPlaylistID).Scan(&pos); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO playlist_items(id,playlist_id,track_id,position,created_at) VALUES(?,?,?,?,?)`, n.ID+"-default", DefaultPlaylistID, n.ID, pos, now); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) UpdateTrack(ctx context.Context, id string, weight, start float64, end *float64, volume float64, lyrics string, identity ...*string) (Track, error) {
@@ -441,11 +449,31 @@ func (s *Store) ReplaceTrack(ctx context.Context, id string, replacement NewTrac
 		return Track{}, err
 	}
 	defer tx.Rollback()
+	if err = replaceTrackTx(ctx, tx, id, replacement, oldFiles); err != nil {
+		return Track{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Track{}, err
+	}
+	return s.Track(ctx, id)
+}
+
+func replaceTrackTx(ctx context.Context, tx *sql.Tx, id string, replacement NewTrack, oldFiles []PendingFile) error {
+	var err error
 	var oldOriginal, oldPlayable string
 	var start float64
 	var end sql.NullFloat64
 	if err = tx.QueryRowContext(ctx, `SELECT original_path,playable_path,playback_start_seconds,playback_end_seconds FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, id, DefaultUserID).Scan(&oldOriginal, &oldPlayable, &start, &end); err != nil {
-		return Track{}, err
+		return err
+	}
+	if len(oldFiles) > 0 {
+		matches := make(map[string]bool)
+		for _, file := range oldFiles {
+			matches[file.Path] = true
+		}
+		if !matches[oldOriginal] || !matches[oldPlayable] {
+			return errors.New("音频已被另一任务替换，请重新上传")
+		}
 	}
 	endValue := any(nil)
 	if start >= replacement.DurationSeconds {
@@ -458,17 +486,14 @@ func (s *Store) ReplaceTrack(ctx context.Context, id string, replacement NewTrac
 			continue
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO pending_file_deletions(path,size_bytes,created_at) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET size_bytes=excluded.size_bytes,last_error=''`, file.Path, file.SizeBytes, nowText()); err != nil {
-			return Track{}, err
+			return err
 		}
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE tracks SET title=CASE WHEN custom_title=1 THEN title ELSE ? END,artist=CASE WHEN custom_artist=1 THEN artist ELSE ? END,album=?,file_name=?,original_path=?,playable_path=?,content_type=?,size_bytes=?,duration_seconds=?,playback_start_seconds=?,playback_end_seconds=?,audio_version=audio_version+1,updated_at=? WHERE id=? AND owner_user_id=? AND original_path=? AND playable_path=?`, replacement.Title, replacement.Artist, replacement.Album, replacement.FileName, replacement.OriginalPath, replacement.PlayablePath, replacement.ContentType, replacement.SizeBytes, replacement.DurationSeconds, start, endValue, nowText(), id, DefaultUserID, oldOriginal, oldPlayable)
 	if err = requireOne(result, err); err != nil {
-		return Track{}, err
+		return err
 	}
-	if err = tx.Commit(); err != nil {
-		return Track{}, err
-	}
-	return s.Track(ctx, id)
+	return nil
 }
 
 func (s *Store) PendingFiles(ctx context.Context) ([]PendingFile, error) {
@@ -527,7 +552,7 @@ func (s *Store) RecordPurgeError(ctx context.Context, id string, failure error) 
 
 func (s *Store) Usage(ctx context.Context) (int64, error) {
 	var n sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT (SELECT COALESCE(SUM(size_bytes),0) FROM tracks)+(SELECT COALESCE(SUM(size_bytes),0) FROM pending_file_deletions)`).Scan(&n)
+	err := s.db.QueryRowContext(ctx, `SELECT `+usageSQL).Scan(&n)
 	return n.Int64, err
 }
 

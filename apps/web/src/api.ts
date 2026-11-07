@@ -1,4 +1,6 @@
-import type { LyricsSearchResult, Playlist, Quota, Track } from '@music/domain'
+import type { LyricsSearchResult, Playlist, Quota, Track, UploadJob } from '@music/domain'
+
+import { uploadFile } from './platform/upload'
 
 type PlaylistPayload = Omit<Playlist, 'tracks'> & { tracks: Track[] | null }
 
@@ -17,13 +19,11 @@ export const api = {
     return (playlists ?? []).map((playlist) => ({ ...playlist, tracks: playlist.tracks ?? [] }))
   },
   quota: () => request<Quota>('/api/quota'),
-  upload: (file: File) => {
-    const data = new FormData(); data.append('file', file)
-    return request<Track>('/api/tracks', { method: 'POST', body: data })
-  },
+  jobs: () => request<UploadJob[]>('/api/jobs'),
+  upload: (file: File, onProgress?: (percent: number) => void, requestKey?: string) => uploadFile('/api/tracks', file, onProgress, requestKey),
   replaceAudio: (trackID: string, file: File) => {
     const data = new FormData(); data.append('file', file)
-    return request<Track>(`/api/tracks/${trackID}/audio`, { method: 'PUT', body: data })
+    return request<UploadJob>(`/api/tracks/${trackID}/audio`, { method: 'PUT', body: data })
   },
   updateTrack: (track: Track) => request<Track>(`/api/tracks/${track.id}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({

@@ -25,11 +25,12 @@ import (
 const QuotaBytes int64 = 10 * 1024 * 1024 * 1024
 
 type API struct {
-	Store  *store.Store
-	Media  *media.Processor
-	Lyrics *lyrics.Client
-	Log    *slog.Logger
-	WebDir string
+	Store      *store.Store
+	Media      *media.Processor
+	Lyrics     *lyrics.Client
+	Log        *slog.Logger
+	WebDir     string
+	QuotaLimit int64
 
 	maintenanceMu sync.Mutex
 }
@@ -46,6 +47,7 @@ func (a *API) Handler() http.Handler {
 	r.Delete("/api/playlists/{playlistID}", a.deletePlaylist)
 	r.Post("/api/playlists/{playlistID}/tracks/{trackID}", a.addTrack)
 	r.Delete("/api/playlists/{playlistID}/tracks/{trackID}", a.removeTrack)
+	r.Get("/api/jobs", a.jobs)
 	r.Post("/api/tracks", a.upload)
 	r.Patch("/api/tracks/{trackID}", a.updateTrack)
 	r.Delete("/api/tracks/{trackID}", a.deleteTrack)
@@ -175,94 +177,6 @@ func (a *API) addTrack(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *API) upload(w http.ResponseWriter, r *http.Request) {
-	used, err := a.Store.Usage(r.Context())
-	if err != nil {
-		a.fail(w, err)
-		return
-	}
-	if used >= QuotaBytes {
-		writeError(w, http.StatusInsufficientStorage, errors.New("存储空间已满"))
-		return
-	}
-	mr, err := r.MultipartReader()
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	part, err := filePart(mr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	defer part.Close()
-	result, err := a.Media.Prepare(r.Context(), part.FileName(), io.LimitReader(part, QuotaBytes-used+1))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if result.SizeBytes > QuotaBytes-used {
-		media.Remove(result)
-		writeError(w, http.StatusInsufficientStorage, errors.New("文件超过剩余空间"))
-		return
-	}
-	t, err := a.Store.InsertTrack(r.Context(), store.NewTrack{ID: result.ID, Title: result.Title, Artist: result.Artist, Album: result.Album, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, FileName: part.FileName(), SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds})
-	if err != nil {
-		media.Remove(result)
-		a.fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, t)
-}
-
-func (a *API) replaceAudio(w http.ResponseWriter, r *http.Request) {
-	track, err := a.Store.Track(r.Context(), chi.URLParam(r, "trackID"))
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	used, err := a.Store.Usage(r.Context())
-	if err != nil {
-		a.fail(w, err)
-		return
-	}
-	if used >= QuotaBytes {
-		writeError(w, http.StatusInsufficientStorage, errors.New("存储空间已满"))
-		return
-	}
-	mr, err := r.MultipartReader()
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	part, err := filePart(mr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	defer part.Close()
-	result, err := a.Media.Prepare(r.Context(), part.FileName(), io.LimitReader(part, QuotaBytes-used+1))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if result.SizeBytes > QuotaBytes-used {
-		media.Remove(result)
-		writeError(w, http.StatusInsufficientStorage, errors.New("文件超过剩余空间"))
-		return
-	}
-	replaced, err := a.Store.ReplaceTrack(r.Context(), track.ID, store.NewTrack{Title: result.Title, Artist: result.Artist, Album: result.Album, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, FileName: part.FileName(), SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds}, storedFiles(track))
-	if err != nil {
-		media.Remove(result)
-		a.fail(w, err)
-		return
-	}
-	// Replacement is already visible. Cleanup is retried persistently if the
-	// old version cannot be removed immediately.
-	a.Maintain(r.Context())
-	writeJSON(w, http.StatusOK, replaced)
-}
-
 func (a *API) deleteTrack(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.SoftDeleteTrack(r.Context(), chi.URLParam(r, "trackID"), time.Now()); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -336,13 +250,14 @@ func (a *API) audio(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) quota(w http.ResponseWriter, r *http.Request) {
-	used, err := a.Store.Usage(r.Context())
+	used, reserved, err := a.Store.Quota(r.Context())
 	if err != nil {
 		a.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int64{"usedBytes": used, "limitBytes": QuotaBytes, "remainingBytes": QuotaBytes - used})
+	writeJSON(w, http.StatusOK, map[string]int64{"usedBytes": used, "reservedBytes": reserved, "limitBytes": a.quotaLimit(), "remainingBytes": a.quotaLimit() - used - reserved})
 }
+
 func (a *API) fail(w http.ResponseWriter, err error) {
 	if a.Log != nil {
 		a.Log.Error("request failed", "error", err)

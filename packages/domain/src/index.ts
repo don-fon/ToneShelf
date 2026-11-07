@@ -27,8 +27,21 @@ export interface Playlist {
   tracks: Track[]
 }
 
+export interface UploadJob {
+  id: string
+  fileName: string
+  requestKey?: string
+  targetTrackId?: string
+  trackId?: string
+  state: 'receiving' | 'queued' | 'processing' | 'succeeded' | 'failed'
+  reservedBytes: number
+  error?: string
+  createdAt: string
+}
+
 export interface Quota {
   usedBytes: number
+  reservedBytes: number
   limitBytes: number
   remainingBytes: number
 }
