@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"music-player/server/internal/lyrics"
 	"music-player/server/internal/media"
 	appserver "music-player/server/internal/server"
 	"music-player/server/internal/store"
@@ -31,7 +32,8 @@ func main() {
 	}
 	defer s.Close()
 	webDir := findWebDir()
-	api := &appserver.API{Store: s, Media: media.New(root), Log: log, WebDir: webDir}
+	lyricsClient := lyrics.New(env("MUSIC_LRCLIB_URL", "https://lrclib.net"))
+	api := &appserver.API{Store: s, Media: media.New(root), Lyrics: lyricsClient, Log: log, WebDir: webDir}
 	httpServer := &http.Server{Addr: env("MUSIC_ADDR", "127.0.0.1:8080"), Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()

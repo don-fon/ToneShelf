@@ -1,4 +1,4 @@
-import type { Playlist, Quota, Track } from '@music/domain'
+import type { LyricsSearchResult, Playlist, Quota, Track } from '@music/domain'
 
 type PlaylistPayload = Omit<Playlist, 'tracks'> & { tracks: Track[] | null }
 
@@ -30,6 +30,7 @@ export const api = {
       lyrics: track.lyrics,
     }),
   }),
+  searchLyrics: (trackID: string) => request<LyricsSearchResult>(`/api/tracks/${trackID}/lyrics/search`),
   createPlaylist: (name: string) => request<Playlist>('/api/playlists', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
   }),

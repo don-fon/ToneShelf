@@ -27,4 +27,21 @@ export interface Quota {
   remainingBytes: number
 }
 
+export interface LyricsCandidate {
+  id: number
+  trackName: string
+  artistName: string
+  albumName: string
+  duration: number
+  synced: boolean
+  lyrics: string
+  score: number
+}
+
+export interface LyricsSearchResult {
+  queryTitle: string
+  queryArtist: string
+  candidates: LyricsCandidate[]
+}
+
 export type PlaybackMode = 'random' | 'repeat-one'

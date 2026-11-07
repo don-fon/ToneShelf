@@ -18,6 +18,7 @@ export function App() {
   const current = active?.tracks.find((t) => t.id === player.trackID) ?? null
   const engine = useRef(new WebAudioEngine()).current
   const [editing, setEditing] = useState<Track | null>(null)
+  const [selectedLyricsID, setSelectedLyricsID] = useState<number | null>(null)
   const [position, setPosition] = useState(player.position)
   const refresh = () => Promise.all([query.invalidateQueries({ queryKey: ['playlists'] }), query.invalidateQueries({ queryKey: ['quota'] })])
 
@@ -61,6 +62,7 @@ export function App() {
   const upload = useMutation({ mutationFn: api.upload, onSuccess: refresh })
   const create = useMutation({ mutationFn: api.createPlaylist, onSuccess: refresh })
   const save = useMutation({ mutationFn: api.updateTrack, onSuccess: async () => { await refresh(); setEditing(null) } })
+  const lyricsSearch = useMutation({ mutationFn: api.searchLyrics, onMutate: () => setSelectedLyricsID(null) })
   const [playlistName, setPlaylistName] = useState('')
   const library = useMemo(() => playlists.find((p) => p.isDefault)?.tracks ?? [], [playlists])
 
@@ -83,13 +85,31 @@ export function App() {
           <button className="play" onClick={() => current?.id === track.id && player.playing ? player.setPlaying(false) : playTrack(track)}>{current?.id === track.id && player.playing ? '❚❚' : '▶'}</button>
           <div><strong>{track.title}</strong><small>{track.artist || '未知艺术家'}{track.album ? ` · ${track.album}` : ''}</small></div>
           <span>{time(track.durationSeconds)}</span><span>{track.baseRandomWeight}</span><span>{Math.round(track.volumeRatio * 100)}%</span>
-          <button className="edit" onClick={() => setEditing({ ...track })}>设置</button>
+          <button className="edit" onClick={() => { lyricsSearch.reset(); setSelectedLyricsID(null); setEditing({ ...track }) }}>设置</button>
         </div>)}
         {!active?.tracks.length && <div className="empty"><b>这里还没有音乐</b><span>上传一个音频文件开始播放</span></div>}
       </section>
       {active && !active.isDefault && library.length > 0 && <details className="add"><summary>从音乐库添加歌曲</summary>{library.filter((t) => !active.tracks.some((x) => x.id === t.id)).map((t) => <button key={t.id} onClick={() => api.addTrack(active.id,t.id).then(refresh)}>＋ {t.title}</button>)}</details>}
     </main>
-    {editing && <div className="modal"><form onSubmit={(e) => { e.preventDefault(); save.mutate(editing) }}><h2>歌曲设置</h2><p>{editing.title}</p><label>随机权重<input type="number" min="0.01" step="0.1" value={editing.baseRandomWeight} onChange={(e) => setEditing({ ...editing, baseRandomWeight: Number(e.target.value) })}/></label><div className="range"><label>开始（秒）<input type="number" min="0" step="0.1" value={editing.playbackStartSeconds} onChange={(e) => setEditing({ ...editing, playbackStartSeconds: Number(e.target.value) })}/></label><label>结束（秒）<input type="number" min="0" step="0.1" value={editing.playbackEndSeconds ?? ''} onChange={(e) => setEditing({ ...editing, playbackEndSeconds: e.target.value === '' ? null : Number(e.target.value) })}/></label></div><label>单曲音量 {Math.round(editing.volumeRatio*100)}%<input type="range" min="0" max="1" step="0.01" value={editing.volumeRatio} onChange={(e) => setEditing({ ...editing, volumeRatio: Number(e.target.value) })}/></label><label>歌词<textarea rows={8} value={editing.lyrics} onChange={(e) => setEditing({ ...editing, lyrics: e.target.value })}/></label><div className="actions"><button type="button" onClick={() => setEditing(null)}>取消</button><button className="primary">保存</button></div></form></div>}
+    {editing && <div className="modal"><form onSubmit={(e) => { e.preventDefault(); save.mutate(editing) }}>
+      <h2>歌曲设置</h2><p>{editing.title}</p>
+      <label>随机权重<input type="number" min={Number.MIN_VALUE} step="any" value={editing.baseRandomWeight} onChange={(e) => setEditing({ ...editing, baseRandomWeight: Number(e.target.value) })}/></label>
+      <div className="range"><label>开始（秒）<input type="number" min="0" step="0.1" value={editing.playbackStartSeconds} onChange={(e) => setEditing({ ...editing, playbackStartSeconds: Number(e.target.value) })}/></label><label>结束（秒）<input type="number" min="0" step="0.1" value={editing.playbackEndSeconds ?? ''} onChange={(e) => setEditing({ ...editing, playbackEndSeconds: e.target.value === '' ? null : Number(e.target.value) })}/></label></div>
+      <label>单曲音量 {Math.round(editing.volumeRatio*100)}%<input type="range" min="0" max="1" step="0.01" value={editing.volumeRatio} onChange={(e) => setEditing({ ...editing, volumeRatio: Number(e.target.value) })}/></label>
+      <div className="lyrics-editor">
+        <div className="lyrics-tools"><span>歌词</span><button type="button" onClick={() => lyricsSearch.mutate(editing.id)} disabled={lyricsSearch.isPending}>{lyricsSearch.isPending ? '正在搜索…' : '从 LRCLIB 匹配'}</button></div>
+        {lyricsSearch.error && <small className="error">{lyricsSearch.error.message}</small>}
+        {lyricsSearch.data && <div className="lyrics-results">
+          <small>使用“{lyricsSearch.data.queryTitle}”{lyricsSearch.data.queryArtist ? ` / “${lyricsSearch.data.queryArtist}”` : ''}找到 {lyricsSearch.data.candidates.length} 个候选</small>
+          {lyricsSearch.data.candidates.map((candidate) => <button type="button" className={selectedLyricsID === candidate.id ? 'selected' : ''} key={candidate.id} onClick={() => { setSelectedLyricsID(candidate.id); setEditing({ ...editing, lyrics: candidate.lyrics }) }}>
+            <strong>{candidate.trackName}</strong><span>{candidate.artistName || '未知艺术家'} · {time(candidate.duration)} · {candidate.synced ? '同步歌词' : '纯文本'}</span>
+          </button>)}
+          {!lyricsSearch.data.candidates.length && <span className="no-result">没有找到可用歌词</span>}
+        </div>}
+        <textarea aria-label="歌词" rows={8} value={editing.lyrics} onChange={(e) => { setSelectedLyricsID(null); setEditing({ ...editing, lyrics: e.target.value }) }}/>
+      </div>
+      <div className="actions"><button type="button" onClick={() => setEditing(null)}>取消</button><button className="primary">保存</button></div>
+    </form></div>}
     <footer className="player"><div className="now"><span className="cover">♪</span><div><strong>{current?.title ?? '选择一首音乐'}</strong><small>{current?.artist || '尚未播放'}</small></div></div><div className="controls"><div><button onClick={() => player.setMode(player.mode === 'random' ? 'repeat-one' : 'random')}>{player.mode === 'random' ? '⤨' : '↻'}</button><button className="main" disabled={!current} onClick={() => player.setPlaying(!player.playing)}>{player.playing ? '❚❚' : '▶'}</button><button disabled={!active?.tracks.length} onClick={next}>▶|</button></div><label><span>{time(position)}</span><input type="range" min={current?.playbackStartSeconds ?? 0} max={current?.playbackEndSeconds ?? current?.durationSeconds ?? 1} step="0.1" value={position} onChange={(e) => { const p=Number(e.target.value);setPosition(p);engine.seek(p);player.setPosition(p) }}/><span>{time(current?.playbackEndSeconds ?? current?.durationSeconds)}</span></label></div><label className="volume">♬<input type="range" min="0" max="1" step="0.01" value={player.masterVolume} onChange={(e) => player.setMasterVolume(Number(e.target.value))}/></label></footer>
   </div>
 }

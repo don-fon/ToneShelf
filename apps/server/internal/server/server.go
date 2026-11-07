@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"music-player/server/internal/lyrics"
 	"music-player/server/internal/media"
 	"music-player/server/internal/store"
 )
@@ -25,6 +26,7 @@ const QuotaBytes int64 = 10 * 1024 * 1024 * 1024
 type API struct {
 	Store  *store.Store
 	Media  *media.Processor
+	Lyrics *lyrics.Client
 	Log    *slog.Logger
 	WebDir string
 }
@@ -40,12 +42,34 @@ func (a *API) Handler() http.Handler {
 	r.Post("/api/playlists/{playlistID}/tracks/{trackID}", a.addTrack)
 	r.Post("/api/tracks", a.upload)
 	r.Patch("/api/tracks/{trackID}", a.updateTrack)
+	r.Get("/api/tracks/{trackID}/lyrics/search", a.searchLyrics)
 	r.Get("/api/tracks/{trackID}/audio", a.audio)
 	r.Get("/api/quota", a.quota)
 	if a.WebDir != "" {
 		r.Handle("/*", spaHandler(a.WebDir))
 	}
 	return r
+}
+
+func (a *API) searchLyrics(w http.ResponseWriter, r *http.Request) {
+	if a.Lyrics == nil {
+		writeError(w, http.StatusServiceUnavailable, errors.New("歌词搜索未启用"))
+		return
+	}
+	track, err := a.Store.Track(r.Context(), chi.URLParam(r, "trackID"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	result, err := a.Lyrics.Search(r.Context(), lyrics.SearchInput{
+		Title: track.Title, Artist: track.Artist, Album: track.Album, DurationSeconds: track.DurationSeconds,
+	})
+	if err != nil {
+		a.Log.Warn("lyrics search failed", "track", track.ID, "error", err)
+		writeError(w, http.StatusBadGateway, errors.New("歌词服务暂时不可用"))
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func spaHandler(root string) http.HandlerFunc {

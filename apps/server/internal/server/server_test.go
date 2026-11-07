@@ -15,9 +15,51 @@ import (
 	"strings"
 	"testing"
 
+	"music-player/server/internal/lyrics"
 	"music-player/server/internal/media"
 	"music-player/server/internal/store"
 )
+
+func TestLyricsSearchEndpointReturnsCandidatesWithoutSaving(t *testing.T) {
+	var gotTitle, gotArtist string
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTitle, gotArtist = r.URL.Query().Get("track_name"), r.URL.Query().Get("artist_name")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":29152005,"trackName":"ワールドイズマイン [World Is Mine]","artistName":"ryo","albumName":"supercell","duration":253,"plainLyrics":"plain","syncedLyrics":"[00:01.00] synced"}]`))
+	}))
+	defer provider.Close()
+
+	root := t.TempDir()
+	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	track, err := s.InsertTrack(context.Background(), store.NewTrack{ID: "track-1", Title: "ryo _ 初音未来 - ワールドイズマイン (World is Mine)_H", OriginalPath: "a", PlayablePath: "b", ContentType: "audio/mpeg", SizeBytes: 1, DurationSeconds: 255.240726})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &API{Store: s, Media: media.New(root), Lyrics: lyrics.New(provider.URL), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/tracks/track-1/lyrics/search", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if gotTitle != "ワールドイズマイン" || gotArtist != "ryo" {
+		t.Fatalf("provider query title=%q artist=%q", gotTitle, gotArtist)
+	}
+	var result lyrics.SearchResult
+	if err = json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 1 || result.Candidates[0].ID != 29152005 || !result.Candidates[0].Synced {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	stored, err := s.Track(context.Background(), track.ID)
+	if err != nil || stored.Lyrics != "" {
+		t.Fatalf("search must not save lyrics: %#v, %v", stored, err)
+	}
+}
 
 func TestUploadTranscodePlaylistAndRangeFlow(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
