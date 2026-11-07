@@ -53,5 +53,6 @@ describe('empty music library', () => {
 
     expect(await screen.findByText('这里还没有音乐')).toBeTruthy()
     expect(screen.getAllByText('默认歌单').length).toBe(2)
+    expect(document.querySelector('input[type="file"]')?.getAttribute('accept')).toContain('.aac')
   })
 })

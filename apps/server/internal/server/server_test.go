@@ -26,11 +26,35 @@ func TestUploadTranscodePlaylistAndRangeFlow(t *testing.T) {
 	if _, err := exec.LookPath("ffprobe"); err != nil {
 		t.Skip("ffprobe is not available")
 	}
+	tests := []struct {
+		name          string
+		filename      string
+		encodeArgs    []string
+		wantTranscode bool
+	}{
+		{name: "mp3 direct", filename: "sample.mp3", encodeArgs: []string{"-c:a", "libmp3lame", "-q:a", "4"}},
+		{name: "wav", filename: "sample.wav", encodeArgs: []string{"-c:a", "pcm_s16le"}, wantTranscode: true},
+		{name: "aac adts", filename: "sample.aac", encodeArgs: []string{"-c:a", "aac", "-b:a", "128k", "-f", "adts"}, wantTranscode: true},
+		{name: "aac in m4a", filename: "sample.m4a", encodeArgs: []string{"-c:a", "aac", "-b:a", "128k"}, wantTranscode: true},
+		{name: "aac with misleading extension", filename: "renamed.mp3", encodeArgs: []string{"-c:a", "aac", "-b:a", "128k", "-f", "adts"}, wantTranscode: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testUploadFlow(t, test.filename, test.encodeArgs, test.wantTranscode)
+		})
+	}
+}
+
+func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTranscode bool) {
+	t.Helper()
 	root := t.TempDir()
-	wavPath := filepath.Join(root, "sample.wav")
-	cmd := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "pcm_s16le", wavPath)
+	sourcePath := filepath.Join(root, filename)
+	args := []string{"-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2"}
+	args = append(args, encodeArgs...)
+	args = append(args, sourcePath)
+	cmd := exec.Command("ffmpeg", args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("generate wav: %v: %s", err, output)
+		t.Fatalf("generate %s: %v: %s", filename, err, output)
 	}
 
 	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
@@ -43,19 +67,19 @@ func TestUploadTranscodePlaylistAndRangeFlow(t *testing.T) {
 
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
-	filePart, err := form.CreateFormFile("file", "sample.wav")
+	filePart, err := form.CreateFormFile("file", filename)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wav, err := os.Open(wavPath)
+	source, err := os.Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = io.Copy(filePart, wav); err != nil {
-		wav.Close()
+	if _, err = io.Copy(filePart, source); err != nil {
+		source.Close()
 		t.Fatal(err)
 	}
-	if err = wav.Close(); err != nil {
+	if err = source.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err = form.Close(); err != nil {
@@ -79,6 +103,9 @@ func TestUploadTranscodePlaylistAndRangeFlow(t *testing.T) {
 	}
 	if track.ContentType != "audio/mpeg" || filepath.Ext(storedTrack.PlayablePath) != ".mp3" {
 		t.Fatalf("unexpected playable track: %#v", track)
+	}
+	if got := storedTrack.PlayablePath != storedTrack.OriginalPath; got != wantTranscode {
+		t.Fatalf("transcoded=%v, want %v; original=%s playable=%s", got, wantTranscode, storedTrack.OriginalPath, storedTrack.PlayablePath)
 	}
 
 	playlistResponse := httptest.NewRecorder()

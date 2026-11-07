@@ -75,7 +75,7 @@ export function App() {
       <div className="quota"><span>存储空间</span><b>{bytes(quota?.usedBytes)} / {bytes(quota?.limitBytes)}</b><i><u style={{ width: `${Math.min(100, ((quota?.usedBytes ?? 0) / (quota?.limitBytes || 1)) * 100)}%` }}/></i></div>
     </aside>
     <main>
-      <section className="hero"><div><small>当前歌单</small><h1>{active?.name ?? '默认歌单'}</h1><p>{active?.tracks.length ?? 0} 首音乐 · 加权随机播放</p></div><label className="upload"><input type="file" accept="audio/*" onChange={(e) => { const file=e.target.files?.[0]; if(file) upload.mutate(file); e.target.value='' }}/>{upload.isPending ? '处理中…' : '上传音乐'}</label></section>
+      <section className="hero"><div><small>当前歌单</small><h1>{active?.name ?? '默认歌单'}</h1><p>{active?.tracks.length ?? 0} 首音乐 · 加权随机播放</p></div><label className="upload"><input type="file" accept="audio/*,.aac,.m4a,.m4b,.mp4,.flac,.ogg,.opus,.wma,.wav" onChange={(e) => { const file=e.target.files?.[0]; if(file) upload.mutate(file); e.target.value='' }}/>{upload.isPending ? '处理中…' : '上传音乐'}</label></section>
       {upload.error && <p className="error">{upload.error.message}</p>}
       <section className="tracks">
         <div className="track heading"><span>#</span><span>歌曲</span><span>时长</span><span>权重</span><span>音量</span><span/></div>

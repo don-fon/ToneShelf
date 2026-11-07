@@ -29,6 +29,10 @@ type probeOutput struct {
 		Duration string            `json:"duration"`
 		Tags     map[string]string `json:"tags"`
 	} `json:"format"`
+	Streams []struct {
+		CodecName string `json:"codec_name"`
+		CodecType string `json:"codec_type"`
+	} `json:"streams"`
 }
 
 func New(root string) *Processor { return &Processor{Root: root, FFmpeg: "ffmpeg", FFprobe: "ffprobe"} }
@@ -91,7 +95,7 @@ func (p *Processor) Prepare(ctx context.Context, name string, src io.Reader) (re
 		return result, err
 	}
 	result.SizeBytes = info.Size()
-	if !strings.EqualFold(ext, ".mp3") {
+	if meta.codec != "mp3" {
 		playable := filepath.Join(p.Root, "media", "playable", id+".mp3")
 		cmd := exec.CommandContext(ctx, p.FFmpeg, "-v", "error", "-y", "-i", original, "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "2", "-ac", "2", playable)
 		if output, cmdErr := cmd.CombinedOutput(); cmdErr != nil {
@@ -110,10 +114,11 @@ func (p *Processor) Prepare(ctx context.Context, name string, src io.Reader) (re
 type metadata struct {
 	duration float64
 	tags     map[string]string
+	codec    string
 }
 
 func (p *Processor) probe(ctx context.Context, path string) (metadata, error) {
-	cmd := exec.CommandContext(ctx, p.FFprobe, "-v", "error", "-show_entries", "format=duration:format_tags=title,artist,album", "-of", "json", path)
+	cmd := exec.CommandContext(ctx, p.FFprobe, "-v", "error", "-show_entries", "format=duration:format_tags=title,artist,album:stream=codec_name,codec_type", "-of", "json", path)
 	b, err := cmd.Output()
 	if err != nil {
 		return metadata{}, err
@@ -126,7 +131,12 @@ func (p *Processor) probe(ctx context.Context, path string) (metadata, error) {
 	if _, err = fmt.Sscanf(out.Format.Duration, "%f", &d); err != nil || d <= 0 {
 		return metadata{}, errors.New("音频时长无效")
 	}
-	return metadata{duration: d, tags: out.Format.Tags}, nil
+	for _, stream := range out.Streams {
+		if stream.CodecType == "audio" && stream.CodecName != "" {
+			return metadata{duration: d, tags: out.Format.Tags, codec: strings.ToLower(stream.CodecName)}, nil
+		}
+	}
+	return metadata{}, errors.New("未找到音频轨道")
 }
 
 func randomID() (string, error) {
