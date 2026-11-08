@@ -58,6 +58,7 @@ export interface LyricsCandidate {
 }
 
 export interface LyricsSearchResult {
+  expandedSearch?: boolean
   queryTitle: string
   queryArtist: string
   candidates: LyricsCandidate[]

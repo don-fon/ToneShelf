@@ -24,7 +24,9 @@ import (
 func TestLyricsSearchEndpointReturnsCandidatesWithoutSaving(t *testing.T) {
 	var gotTitle, gotArtist string
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotTitle, gotArtist = r.URL.Query().Get("track_name"), r.URL.Query().Get("artist_name")
+		if gotTitle == "" {
+			gotTitle, gotArtist = r.URL.Query().Get("track_name"), r.URL.Query().Get("artist_name")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":29152005,"trackName":"ワールドイズマイン [World Is Mine]","artistName":"ryo","albumName":"supercell","duration":253,"plainLyrics":"plain","syncedLyrics":"[00:01.00] synced"}]`))
 	}))

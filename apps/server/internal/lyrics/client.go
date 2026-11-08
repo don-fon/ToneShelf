@@ -41,9 +41,10 @@ type Candidate struct {
 }
 
 type SearchResult struct {
-	QueryTitle  string      `json:"queryTitle"`
-	QueryArtist string      `json:"queryArtist"`
-	Candidates  []Candidate `json:"candidates"`
+	QueryTitle     string      `json:"queryTitle"`
+	QueryArtist    string      `json:"queryArtist"`
+	ExpandedSearch bool        `json:"expandedSearch,omitempty"`
+	Candidates     []Candidate `json:"candidates"`
 }
 
 type Client struct {
@@ -87,16 +88,19 @@ func (c *Client) Search(ctx context.Context, input SearchInput) (SearchResult, e
 	if err = c.getJSON(ctx, endpoint.String(), &records, true); err != nil {
 		return result, err
 	}
-	for _, item := range records {
-		lyricsText, synced := preferredLyrics(item)
-		if item.Instrumental || lyricsText == "" {
-			continue
+	result.Candidates = appendCandidates(result.Candidates, records, input, title, artist)
+	if artist != "" && len(uniqueCandidates(result.Candidates)) < 3 {
+		query.Del("artist_name")
+		endpoint.RawQuery = query.Encode()
+		var broader []record
+		if err = c.getJSON(ctx, endpoint.String(), &broader, true); err == nil {
+			result.Candidates = appendCandidates(result.Candidates, broader, input, title, artist)
+			result.ExpandedSearch = true
+		} else if ctx.Err() != nil {
+			return result, ctx.Err()
+		} else if len(result.Candidates) == 0 {
+			return result, err
 		}
-		result.Candidates = append(result.Candidates, Candidate{
-			ID: item.ID, TrackName: item.TrackName, ArtistName: item.ArtistName,
-			AlbumName: item.AlbumName, Duration: item.Duration, Synced: synced,
-			Lyrics: lyricsText, Score: score(input, title, artist, item, synced),
-		})
 	}
 	sort.SliceStable(result.Candidates, func(i, j int) bool {
 		return result.Candidates[i].Score > result.Candidates[j].Score
@@ -106,6 +110,21 @@ func (c *Client) Search(ctx context.Context, input SearchInput) (SearchResult, e
 		result.Candidates = result.Candidates[:8]
 	}
 	return result, nil
+}
+
+func appendCandidates(candidates []Candidate, records []record, input SearchInput, title, artist string) []Candidate {
+	for _, item := range records {
+		lyricsText, synced := preferredLyrics(item)
+		if item.Instrumental || lyricsText == "" {
+			continue
+		}
+		candidates = append(candidates, Candidate{
+			ID: item.ID, TrackName: item.TrackName, ArtistName: item.ArtistName,
+			AlbumName: item.AlbumName, Duration: item.Duration, Synced: synced,
+			Lyrics: lyricsText, Score: score(input, title, artist, item, synced),
+		})
+	}
+	return candidates
 }
 
 func uniqueCandidates(candidates []Candidate) []Candidate {
