@@ -5,6 +5,43 @@ import { LyricsView } from './LyricsView'
 afterEach(cleanup)
 
 describe('LyricsView', () => {
+  it('highlights and scrolls 300ms early while keeping lyric seeks on their timestamps', () => {
+    const onSeek = vi.fn()
+    const lyrics = '[00:01]First\n[00:03]Second'
+    const view = render(<LyricsView trackTitle="song" lyrics={lyrics} position={0.699} onSeek={onSeek}/>)
+    expect(screen.queryByRole('button', { current: true })).toBeNull()
+    const first = screen.getByRole('button', { name: 'First' })
+    const second = screen.getByRole('button', { name: 'Second' })
+    first.scrollIntoView = vi.fn()
+    second.scrollIntoView = vi.fn()
+    view.rerender(<LyricsView trackTitle="song" lyrics={lyrics} position={0.7} onSeek={onSeek}/>)
+    expect(first.getAttribute('aria-current')).toBe('true')
+    expect(first.scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' })
+    view.rerender(<LyricsView trackTitle="song" lyrics={lyrics} position={2.699} onSeek={onSeek}/>)
+    expect(first.getAttribute('aria-current')).toBe('true')
+    expect(second.scrollIntoView).not.toHaveBeenCalled()
+    view.rerender(<LyricsView trackTitle="song" lyrics={lyrics} position={2.7} onSeek={onSeek}/>)
+    expect(second.getAttribute('aria-current')).toBe('true')
+    expect(second.scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' })
+    fireEvent.click(second)
+    expect(onSeek).toHaveBeenCalledWith(3)
+    view.rerender(<LyricsView trackTitle="song" lyrics={lyrics} position={1} onSeek={onSeek}/>)
+    expect(first.getAttribute('aria-current')).toBe('true')
+    expect(first.scrollIntoView).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([[1000, 1.7, 2], [-1000, 3.7, 4]])('adds animation lead to offset %i without changing seek position', (offset, boundary, target) => {
+    const onSeek = vi.fn()
+    const lyrics = `[offset:${offset}]\n[00:00]First\n[00:03]Second`
+    const view = render(<LyricsView trackTitle="song" lyrics={lyrics} position={boundary - 0.001} onSeek={onSeek}/>)
+    const second = screen.getByRole('button', { name: 'Second' })
+    expect(second.hasAttribute('aria-current')).toBe(false)
+    view.rerender(<LyricsView trackTitle="song" lyrics={lyrics} position={boundary} onSeek={onSeek}/>)
+    expect(second.getAttribute('aria-current')).toBe('true')
+    fireEvent.click(second)
+    expect(onSeek).toHaveBeenCalledWith(target)
+  })
+
   it('keeps uniquely aligned kana visible on either the primary or secondary line', () => {
     const lyrics = '[kana:1やま1かわ]\n[00:01]高山\n[00:01]山\n[00:03]河流\n[00:03]川\n[00:05]尾注'
     const onSeek = vi.fn()

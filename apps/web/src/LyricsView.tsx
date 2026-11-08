@@ -3,6 +3,8 @@ import type { LyricsLayout, LyricsPrimaryLine } from '@music/domain'
 import { LyricText } from './LyricText'
 import { activeLyricIndex, parseLyrics } from '@music/player-policy'
 
+const LYRICS_ANIMATION_LEAD_SECONDS = 0.3
+
 interface LyricsViewProps {
   trackTitle?: string
   lyrics: string
@@ -14,7 +16,7 @@ interface LyricsViewProps {
 
 export function LyricsView({ trackTitle, lyrics, layout, primaryLine, position, onSeek }: LyricsViewProps) {
   const parsed = useMemo(() => parseLyrics(lyrics, { layout, primaryLine }), [lyrics, layout, primaryLine])
-  const activeIndex = parsed.synced ? activeLyricIndex(parsed.lines, position) : -1
+  const activeIndex = parsed.synced ? activeLyricIndex(parsed.lines, position + LYRICS_ANIMATION_LEAD_SECONDS) : -1
   const activeRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
