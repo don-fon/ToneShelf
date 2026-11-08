@@ -5,7 +5,7 @@ import type { UploadJob } from '@music/domain'
 import { api } from './api'
 import { UploadTasks } from './UploadTasks'
 
-vi.mock('./api', () => ({ api: { jobs: vi.fn().mockResolvedValue([]), upload: vi.fn() } }))
+vi.mock('./api', () => ({ api: { jobs: vi.fn().mockResolvedValue([]), upload: vi.fn(), resolveUpload: vi.fn() } }))
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); vi.mocked(api.jobs).mockResolvedValue([]) })
 const renderTasks = () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -13,6 +13,38 @@ const renderTasks = () => {
 }
 
 describe('upload task UI', () => {
+  it.each([true, false])('restores a duplicate prompt and submits overwrite=%s', async (overwrite) => {
+    const job: UploadJob = { id: 'duplicate', fileName: 'different.flac', state: 'queued', requiresConfirmation: true, conflictTitle: '同名歌', targetTrackId: 'existing', reservedBytes: 100, createdAt: '' }
+    vi.mocked(api.jobs).mockResolvedValue([job])
+    vi.mocked(api.resolveUpload).mockImplementation(async () => {
+      vi.mocked(api.jobs).mockResolvedValue([{ ...job, state: overwrite ? 'succeeded' : 'failed', error: overwrite ? '' : '已取消', requiresConfirmation: false, reservedBytes: 0 }])
+    })
+    renderTasks()
+    expect(await screen.findByText('已存在“同名歌”，覆盖音频？')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: overwrite ? '覆盖' : '取消' }))
+    await waitFor(() => expect(api.resolveUpload).toHaveBeenCalledWith('duplicate', overwrite))
+    expect(await screen.findByText(overwrite ? '成功' : '已取消')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '覆盖' })).toBeNull()
+    expect(api.upload).not.toHaveBeenCalled()
+  })
+
+  it('retains the prompt and allows retry when overwrite fails', async () => {
+    vi.mocked(api.jobs).mockResolvedValue([{ id: 'duplicate', fileName: 'song.flac', state: 'queued', requiresConfirmation: true, conflictTitle: 'song', reservedBytes: 100, createdAt: '' }])
+    vi.mocked(api.resolveUpload).mockRejectedValue(new Error('原歌曲名称已改变'))
+    renderTasks()
+    fireEvent.click(await screen.findByRole('button', { name: '覆盖' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('原歌曲名称已改变')
+    expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('stops polling while a duplicate awaits a choice', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api.jobs).mockResolvedValue([{ id: 'duplicate', fileName: 'song.flac', state: 'queued', requiresConfirmation: true, reservedBytes: 100, createdAt: '' }])
+    renderTasks()
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
+    expect(api.jobs).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['queued', 'processing', 'succeeded', 'failed'] as const)('hides internal repair tasks in state %s', async (state) => {
     vi.mocked(api.jobs).mockResolvedValue([{ id: 'repair', kind: 'repair', fileName: 'internal.mp3', targetTrackId: 'song', state, reservedBytes: 0, createdAt: '' }])
     const { client } = renderTasks()

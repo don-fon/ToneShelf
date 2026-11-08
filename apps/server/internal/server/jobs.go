@@ -32,7 +32,7 @@ func (a *API) RunJobs(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			if job.State != "queued" {
+			if job.State != "queued" || job.RequiresConfirmation {
 				continue
 			}
 			if err = a.Store.SetJobState(ctx, job.ID, "queued", "processing", ""); err != nil {
@@ -191,6 +191,9 @@ func (a *API) processJob(ctx context.Context, job store.UploadJob) {
 			_, err = a.Store.CompleteJob(ctx, job, store.NewTrack{ID: result.ID, Title: result.Title, Artist: result.Artist, Album: result.Album, FileName: job.FileName, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, OriginalContentType: result.OriginalContentType, PlaybackIndexVersion: 1, DurationProbeVersion: 1, SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds}, oldFiles)
 		}
 	}
+	if errors.Is(err, store.ErrUploadConflict) {
+		return
+	}
 	if err != nil {
 		if stateErr := a.Store.SetJobState(ctx, job.ID, "processing", "failed", err.Error()); stateErr != nil {
 			a.logMaintenance("fail upload job", stateErr)
@@ -250,6 +253,50 @@ func (a *API) jobs(w http.ResponseWriter, r *http.Request) {
 		visible = append(visible, job)
 	}
 	writeJSON(w, http.StatusOK, visible)
+}
+
+func (a *API) resolveUpload(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Overwrite bool `json:"overwrite"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	jobs, err := a.Store.Jobs(r.Context())
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	for _, job := range jobs {
+		if job.ID != chi.URLParam(r, "jobID") {
+			continue
+		}
+		if !job.RequiresConfirmation {
+			writeError(w, http.StatusConflict, errors.New("任务无需确认"))
+			return
+		}
+		if in.Overwrite {
+			track, trackErr := a.Store.Track(r.Context(), job.TargetTrackID)
+			err = trackErr
+			if err == nil {
+				_, err = a.Store.ConfirmUpload(r.Context(), job, storedFiles(track))
+			}
+		} else {
+			err = a.Store.SetJobState(r.Context(), job.ID, "queued", "failed", "已取消")
+			if err == nil {
+				a.cleanFailedJob(r.Context(), job)
+			}
+		}
+		if err != nil {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		a.Maintain(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 // Each request receives one file; clients can issue any number in parallel.

@@ -10,16 +10,18 @@ const labels = { receiving: '上传中', queued: '等待处理', processing: '�
 export function UploadTasks() {
   const query = useQueryClient()
   const [local, setLocal] = useState<LocalUpload[]>([])
+  const [deciding, setDeciding] = useState<string[]>([])
+  const [decisionError, setDecisionError] = useState('')
   const { data: jobs = [], error } = useQuery({
     queryKey: ['jobs'],
     queryFn: api.jobs,
     refetchInterval: (queryState) => {
       const receiving = local.some((item) => !item.error && !item.jobID)
-      const processing = queryState.state.data?.some((job) => ['receiving', 'queued', 'processing'].includes(job.state))
+      const processing = queryState.state.data?.some((job) => !job.requiresConfirmation && ['receiving', 'queued', 'processing'].includes(job.state))
       return receiving || processing ? 1500 : false
     },
   })
-  const snapshot = jobs.map((job) => job.id + job.state).join('|')
+  const snapshot = jobs.map((job) => job.id + job.state + Boolean(job.requiresConfirmation)).join('|')
   const reservations = jobs.reduce((total, job) => total + job.reservedBytes, 0)
   const previousSnapshot = useRef<string | undefined>(undefined)
   useEffect(() => {
@@ -46,6 +48,18 @@ export function UploadTasks() {
     }
   }
   const userJobs = jobs.filter((job) => job.kind !== 'repair')
+  const resolve = async (id: string, overwrite: boolean) => {
+    setDeciding((items) => [...items, id])
+    setDecisionError('')
+    try {
+      await api.resolveUpload(id, overwrite)
+      await Promise.all(['jobs', 'playlists', 'quota'].map((key) => query.invalidateQueries({ queryKey: [key] })))
+    } catch (reason) {
+      setDecisionError(reason instanceof Error ? reason.message : '操作失败，请重试')
+    } finally {
+      setDeciding((items) => items.filter((item) => item !== id))
+    }
+  }
   const pending = local.filter((item) => !userJobs.some((job) => job.id === item.jobID || (job.requestKey === item.id && job.state !== 'receiving')))
   const visibleJobs = userJobs.filter((job) => job.state !== 'receiving' || !pending.some((item) => item.id === job.requestKey))
   return <>
@@ -53,9 +67,10 @@ export function UploadTasks() {
     {(pending.length > 0 || visibleJobs.length > 0 || error) && <details className="upload-tasks" open={pending.length > 0 || visibleJobs.some((job) => ['receiving', 'queued', 'processing', 'failed'].includes(job.state))}>
       <summary>上传任务 <span>{pending.length + visibleJobs.length}</span></summary>
       {error && <p className="error">无法获取任务状态：{error.message}</p>}
+      {decisionError && <p className="error" role="alert">{decisionError}</p>}
       <div className="upload-task-list">
         {pending.map((item) => <div className="upload-task" key={item.id}><span>{item.name}</span><small className={item.error ? 'error' : ''}>{item.error || `上传中 ${item.progress}%`}</small></div>)}
-        {visibleJobs.map((job) => <div className="upload-task" key={job.id}><span>{job.fileName}{job.targetTrackId && <small>（替换音频）</small>}</span><small className={job.state === 'failed' ? 'error' : ''}>{labels[job.state]}{job.error ? `：${job.error}` : ''}</small></div>)}
+        {visibleJobs.map((job) => <div className={`upload-task ${job.requiresConfirmation ? 'upload-conflict' : ''}`} key={job.id}><span>{job.fileName}{job.targetTrackId && !job.requiresConfirmation && <small>（替换音频）</small>}</span>{job.requiresConfirmation ? <div><small>已存在“{job.conflictTitle}”，覆盖音频？</small><div className="upload-conflict-actions"><button type="button" disabled={deciding.includes(job.id)} onClick={() => void resolve(job.id, true)}>覆盖</button><button type="button" disabled={deciding.includes(job.id)} onClick={() => void resolve(job.id, false)}>取消</button></div></div> : <small className={job.state === 'failed' ? 'error' : ''}>{job.error === '已取消' ? '已取消' : labels[job.state]}{job.error && job.error !== '已取消' ? `：${job.error}` : ''}</small>}</div>)}
       </div>
     </details>}
   </>

@@ -2,24 +2,30 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 )
 
 var ErrQuotaExceeded = errors.New("存储空间不足")
+var ErrUploadConflict = errors.New("存在同名歌曲，需要确认覆盖")
 
 type UploadJob struct {
-	ID            string `json:"id"`
-	Kind          string `json:"kind"`
-	FileName      string `json:"fileName"`
-	RequestKey    string `json:"requestKey,omitempty"`
-	TargetTrackID string `json:"targetTrackId,omitempty"`
-	TrackID       string `json:"trackId,omitempty"`
-	SourcePath    string `json:"-"`
-	OutputPath    string `json:"-"`
-	State         string `json:"state"`
-	ReservedBytes int64  `json:"reservedBytes"`
-	Error         string `json:"error,omitempty"`
-	CreatedAt     string `json:"createdAt"`
+	ID                   string    `json:"id"`
+	Kind                 string    `json:"kind"`
+	FileName             string    `json:"fileName"`
+	RequestKey           string    `json:"requestKey,omitempty"`
+	TargetTrackID        string    `json:"targetTrackId,omitempty"`
+	TrackID              string    `json:"trackId,omitempty"`
+	SourcePath           string    `json:"-"`
+	OutputPath           string    `json:"-"`
+	State                string    `json:"state"`
+	ReservedBytes        int64     `json:"reservedBytes"`
+	Error                string    `json:"error,omitempty"`
+	CreatedAt            string    `json:"createdAt"`
+	RequiresConfirmation bool      `json:"requiresConfirmation,omitempty"`
+	ConflictTitle        string    `json:"conflictTitle,omitempty"`
+	Candidate            *NewTrack `json:"-"`
 }
 
 // Includes all candidate files and reservations. A reservation is acquired
@@ -32,7 +38,7 @@ func (s *Store) CreateJob(ctx context.Context, job UploadJob) error {
 }
 
 func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,kind,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, DefaultUserID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,kind,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at,pending_candidate FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, DefaultUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -40,8 +46,17 @@ func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
 	out := make([]UploadJob, 0)
 	for rows.Next() {
 		var job UploadJob
-		if err = rows.Scan(&job.ID, &job.Kind, &job.FileName, &job.RequestKey, &job.TargetTrackID, &job.TrackID, &job.SourcePath, &job.OutputPath, &job.State, &job.ReservedBytes, &job.Error, &job.CreatedAt); err != nil {
+		var pending string
+		if err = rows.Scan(&job.ID, &job.Kind, &job.FileName, &job.RequestKey, &job.TargetTrackID, &job.TrackID, &job.SourcePath, &job.OutputPath, &job.State, &job.ReservedBytes, &job.Error, &job.CreatedAt, &pending); err != nil {
 			return nil, err
+		}
+		if pending != "" && job.State == "queued" {
+			job.Candidate = &NewTrack{}
+			if err = json.Unmarshal([]byte(pending), job.Candidate); err != nil {
+				return nil, err
+			}
+			job.RequiresConfirmation = true
+			job.ConflictTitle = job.Candidate.Title
 		}
 		out = append(out, job)
 	}
@@ -154,6 +169,17 @@ func (s *Store) QueueOrphan(ctx context.Context, path string, bytes int64) error
 // Activating files and exchanging reservations for committed usage must be one
 // transaction. A crash before commit leaves a recoverable processing job.
 func (s *Store) CompleteJob(ctx context.Context, job UploadJob, track NewTrack, oldFiles []PendingFile) (Track, error) {
+	return s.completeJob(ctx, job, track, oldFiles, "processing")
+}
+
+func (s *Store) ConfirmUpload(ctx context.Context, job UploadJob, oldFiles []PendingFile) (Track, error) {
+	if !job.RequiresConfirmation || job.Candidate == nil {
+		return Track{}, errors.New("任务无需确认")
+	}
+	return s.completeJob(ctx, job, *job.Candidate, oldFiles, "queued")
+}
+
+func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, oldFiles []PendingFile, expected string) (Track, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Track{}, err
@@ -164,11 +190,61 @@ func (s *Store) CompleteJob(ctx context.Context, job UploadJob, track NewTrack, 
 	if err = tx.QueryRowContext(ctx, `SELECT state,reserved_bytes FROM upload_jobs WHERE id=? AND owner_user_id=?`, job.ID, DefaultUserID).Scan(&state, &reserved); err != nil {
 		return Track{}, err
 	}
-	if state != "processing" || track.SizeBytes > reserved {
+	if state != expected || track.SizeBytes > reserved {
 		return Track{}, errors.New("invalid job completion")
+	}
+	if expected == "queued" {
+		var pending, targetTitle string
+		if err = tx.QueryRowContext(ctx, `SELECT pending_candidate FROM upload_jobs WHERE id=?`, job.ID).Scan(&pending); err != nil {
+			return Track{}, err
+		}
+		if pending == "" {
+			return Track{}, errors.New("任务无需确认")
+		}
+		if err = tx.QueryRowContext(ctx, `SELECT title FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, job.TargetTrackID, DefaultUserID).Scan(&targetTitle); err != nil {
+			return Track{}, err
+		}
+		if !strings.EqualFold(strings.TrimSpace(targetTitle), strings.TrimSpace(track.Title)) {
+			return Track{}, errors.New("原歌曲名称已改变，请取消后重新上传")
+		}
 	}
 	id := track.ID
 	if job.TargetTrackID == "" {
+		rows, queryErr := tx.QueryContext(ctx, `SELECT id,title FROM tracks WHERE owner_user_id=? AND deleted_at IS NULL ORDER BY created_at,id`, DefaultUserID)
+		if queryErr != nil {
+			return Track{}, queryErr
+		}
+		var duplicate string
+		for rows.Next() {
+			var existingID, title string
+			if err = rows.Scan(&existingID, &title); err != nil {
+				rows.Close()
+				return Track{}, err
+			}
+			if strings.EqualFold(strings.TrimSpace(title), strings.TrimSpace(track.Title)) {
+				duplicate = existingID
+				break
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return Track{}, err
+		}
+		if duplicate != "" {
+			candidate, marshalErr := json.Marshal(track)
+			if marshalErr != nil {
+				return Track{}, marshalErr
+			}
+			_, err = tx.ExecContext(ctx, `UPDATE upload_jobs SET state='queued',target_track_id=?,pending_candidate=?,reserved_bytes=?,updated_at=? WHERE id=?`, duplicate, string(candidate), track.SizeBytes, nowText(), job.ID)
+			if err != nil {
+				return Track{}, err
+			}
+			if err = tx.Commit(); err != nil {
+				return Track{}, err
+			}
+			return Track{}, ErrUploadConflict
+		}
 		err = insertTrackTx(ctx, tx, track)
 	} else {
 		id = job.TargetTrackID
@@ -177,7 +253,7 @@ func (s *Store) CompleteJob(ctx context.Context, job UploadJob, track NewTrack, 
 	if err != nil {
 		return Track{}, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET state='succeeded',track_id=?,reserved_bytes=0,error='',updated_at=? WHERE id=? AND state='processing'`, id, nowText(), job.ID)
+	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET state='succeeded',track_id=?,reserved_bytes=0,pending_candidate='',error='',updated_at=? WHERE id=? AND state=?`, id, nowText(), job.ID, expected)
 	if err = requireOne(result, err); err != nil {
 		return Track{}, err
 	}

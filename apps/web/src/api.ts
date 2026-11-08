@@ -20,6 +20,9 @@ export const api = {
   },
   quota: () => request<Quota>('/api/quota'),
   jobs: () => request<UploadJob[]>('/api/jobs'),
+  resolveUpload: (jobID: string, overwrite: boolean) => request<void>(`/api/jobs/${jobID}/resolve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ overwrite }),
+  }),
   upload: (file: File, onProgress?: (percent: number) => void, requestKey?: string) => uploadFile('/api/tracks', file, onProgress, requestKey),
   replaceAudio: (trackID: string, file: File) => {
     const data = new FormData(); data.append('file', file)

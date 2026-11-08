@@ -48,6 +48,7 @@ func (a *API) Handler() http.Handler {
 	r.Post("/api/playlists/{playlistID}/tracks/{trackID}", a.addTrack)
 	r.Delete("/api/playlists/{playlistID}/tracks/{trackID}", a.removeTrack)
 	r.Get("/api/jobs", a.jobs)
+	r.Post("/api/jobs/{jobID}/resolve", a.resolveUpload)
 	r.Post("/api/tracks", a.upload)
 	r.Patch("/api/tracks/{trackID}", a.updateTrack)
 	r.Delete("/api/tracks/{trackID}", a.deleteTrack)
