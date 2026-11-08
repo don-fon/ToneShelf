@@ -19,6 +19,14 @@ func (a *API) Maintain(ctx context.Context) {
 		a.logMaintenance("list failed uploads", jobErr)
 	}
 	for _, job := range jobs {
+		if job.Kind == "preflight" && job.State == "queued" {
+			created, parseErr := time.Parse(time.RFC3339Nano, job.CreatedAt)
+			if parseErr == nil && time.Since(created) >= time.Hour {
+				if stateErr := a.Store.SetJobState(ctx, job.ID, "queued", "failed", "预检查已过期"); stateErr == nil {
+					job.State = "failed"
+				}
+			}
+		}
 		if job.State == "failed" && job.ReservedBytes > 0 {
 			a.cleanFailedJob(ctx, job)
 		}

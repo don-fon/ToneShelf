@@ -1,6 +1,7 @@
 import type { LyricsSearchResult, Playlist, Quota, Track, UploadJob } from '@music/domain'
 
 import { uploadFile } from './platform/upload'
+import { createUploadKey } from './platform/upload-session'
 
 type PlaylistPayload = Omit<Playlist, 'tracks'> & { tracks: Track[] | null }
 
@@ -20,13 +21,14 @@ export const api = {
   },
   quota: () => request<Quota>('/api/quota'),
   jobs: () => request<UploadJob[]>('/api/jobs'),
-  resolveUpload: (jobID: string, overwrite: boolean) => request<void>(`/api/jobs/${jobID}/resolve`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ overwrite }),
+  resolveUpload: (jobID: string, overwrite: boolean, requestKey?: string) => request<void>(`/api/jobs/${jobID}/resolve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ overwrite, requestKey }),
   }),
+  prepareUpload: (file: File, onProgress?: (percent: number) => void) => uploadFile('/api/uploads/check', file, onProgress),
   upload: (file: File, onProgress?: (percent: number) => void, requestKey?: string) => uploadFile('/api/tracks', file, onProgress, requestKey),
   replaceAudio: (trackID: string, file: File) => {
     const data = new FormData(); data.append('file', file)
-    return request<UploadJob>(`/api/tracks/${trackID}/audio`, { method: 'PUT', body: data })
+    return request<UploadJob>(`/api/tracks/${trackID}/audio`, { method: 'PUT', headers: { 'X-Upload-Key': createUploadKey() }, body: data })
   },
   updateTrack: (track: Track) => request<Track>(`/api/tracks/${track.id}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({

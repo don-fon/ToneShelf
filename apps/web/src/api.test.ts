@@ -1,9 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
+import { uploadSession } from './platform/upload-session'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear() })
 
 describe('playlist API normalization', () => {
+  it('counts an audio replacement once and attaches its session request key', async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ id: 'replacement' }) })
+    vi.stubGlobal('fetch', fetch)
+    expect(uploadSession.count()).toBe(0)
+    await api.replaceAudio('song', new File(['audio'], 'replacement.mp3'))
+    expect(uploadSession.count()).toBe(1)
+    expect(fetch.mock.calls[0][0]).toBe('/api/tracks/song/audio')
+    expect(fetch.mock.calls[0][1].headers['X-Upload-Key']).toMatch(/:1$/)
+  })
   it('normalizes a null playlist collection', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

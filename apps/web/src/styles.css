@@ -143,3 +143,5 @@ aside nav{min-height:0;overflow:auto;overscroll-behavior:contain}
   .sidebar-status .upload-task-list{margin:0;max-height:min(240px,40dvh)}
 }
 @media(max-width:800px) and (max-height:500px){.sidebar-status{top:8px;right:56px}}
+.upload-check-notice{position:fixed;z-index:9;top:12px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);padding:10px 14px;border-radius:8px;background:#fffcf8;color:#6f6760;box-shadow:0 4px 20px #0002;font-size:13px;overflow-wrap:anywhere}.upload-check-notice.error{color:#b7432c}.upload-check-notice button{margin-left:8px;border:0;background:transparent;color:inherit}
+.modal .upload-confirm{width:min(460px,100%);color:#2e2926}.upload-confirm p{overflow-wrap:anywhere}.upload-confirm-note{font-size:13px;color:#918981}.upload-confirm-actions{display:flex;justify-content:flex-end;gap:8px}.upload-confirm-actions button{padding:9px 18px;border:1px solid #ded6ce;border-radius:7px;background:white;color:#6f6760}.upload-confirm-actions .primary{background:#d86e43;color:white;border-color:#d86e43}

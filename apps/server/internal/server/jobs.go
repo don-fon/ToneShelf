@@ -32,7 +32,7 @@ func (a *API) RunJobs(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			if job.State != "queued" || job.RequiresConfirmation {
+			if job.State != "queued" || job.RequiresConfirmation || job.Kind == "preflight" {
 				continue
 			}
 			if err = a.Store.SetJobState(ctx, job.ID, "queued", "processing", ""); err != nil {
@@ -55,6 +55,15 @@ func (a *API) RecoverJobs(ctx context.Context) error {
 		return err
 	}
 	for _, job := range jobs {
+		if job.Kind == "preflight" {
+			if job.State != "failed" {
+				if err = a.Store.SetJobState(ctx, job.ID, job.State, "failed", "预检查中断，请重新选择文件"); err != nil {
+					return err
+				}
+			}
+			a.cleanFailedJob(ctx, job)
+			continue
+		}
 		switch job.State {
 		case "receiving":
 			if err = a.Store.SetJobState(ctx, job.ID, "receiving", "failed", "上传中断，请重新选择文件上传"); err != nil {
@@ -244,6 +253,9 @@ func (a *API) jobs(w http.ResponseWriter, r *http.Request) {
 	visible := make([]store.UploadJob, 0)
 	completed := 0
 	for _, job := range jobs {
+		if job.Kind == "preflight" {
+			continue
+		}
 		if job.State == "succeeded" || job.State == "failed" {
 			completed++
 			if completed > 100 {
@@ -257,7 +269,8 @@ func (a *API) jobs(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) resolveUpload(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Overwrite bool `json:"overwrite"`
+		Overwrite  bool   `json:"overwrite"`
+		RequestKey string `json:"requestKey"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -271,6 +284,26 @@ func (a *API) resolveUpload(w http.ResponseWriter, r *http.Request) {
 	for _, job := range jobs {
 		if job.ID != chi.URLParam(r, "jobID") {
 			continue
+		}
+		if job.Kind == "preflight" {
+			if len(in.RequestKey) > 128 {
+				writeError(w, http.StatusBadRequest, errors.New("上传标识过长"))
+				return
+			}
+			if in.Overwrite {
+				err = a.Store.StartPreparedUpload(r.Context(), job.ID, in.RequestKey)
+			} else {
+				err = a.Store.SetJobState(r.Context(), job.ID, "queued", "failed", "已取消")
+				if err == nil {
+					a.cleanFailedJob(r.Context(), job)
+				}
+			}
+			if err != nil {
+				writeError(w, http.StatusConflict, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
 		if !job.RequiresConfirmation {
 			writeError(w, http.StatusConflict, errors.New("任务无需确认"))
@@ -301,7 +334,7 @@ func (a *API) resolveUpload(w http.ResponseWriter, r *http.Request) {
 
 // Each request receives one file; clients can issue any number in parallel.
 // The HTTP lifetime only covers reception, not probing or transcoding.
-func (a *API) receiveJob(w http.ResponseWriter, r *http.Request, target string) {
+func (a *API) receiveJob(w http.ResponseWriter, r *http.Request, target string, preflight ...bool) {
 	if target != "" {
 		if _, err := a.Store.Track(r.Context(), target); err != nil {
 			http.NotFound(w, r)
@@ -330,6 +363,10 @@ func (a *API) receiveJob(w http.ResponseWriter, r *http.Request, target string) 
 	}
 	job := store.UploadJob{ID: id, FileName: part.FileName(), TargetTrackID: target, SourcePath: filepath.Join(a.Media.Root, "media", "originals", id+ext), OutputPath: filepath.Join(a.Media.Root, "media", "playable", id+".mp3"), State: "receiving", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	job.Kind = "upload"
+	checking := len(preflight) > 0 && preflight[0]
+	if checking {
+		job.Kind = "preflight"
+	}
 	if key := r.Header.Get("X-Upload-Key"); len(key) <= 128 {
 		job.RequestKey = key
 	}
@@ -357,7 +394,15 @@ func (a *API) receiveJob(w http.ResponseWriter, r *http.Request, target string) 
 		}
 	}
 	if err == nil {
-		err = a.Store.QueueUpload(r.Context(), id, job.ReservedBytes)
+		if checking {
+			var title string
+			title, err = a.Media.InspectTitle(r.Context(), job.SourcePath, job.FileName)
+			if err == nil {
+				err = a.Store.PrepareUpload(r.Context(), id, title, job.ReservedBytes)
+			}
+		} else {
+			err = a.Store.QueueUpload(r.Context(), id, job.ReservedBytes)
+		}
 	}
 	if err != nil {
 		// A disconnected request cannot be used to persist failure/cleanup.
@@ -376,6 +421,19 @@ func (a *API) receiveJob(w http.ResponseWriter, r *http.Request, target string) 
 		return
 	}
 	job.State = "queued"
+	if checking {
+		jobs, listErr := a.Store.Jobs(r.Context())
+		if listErr != nil {
+			a.fail(w, listErr)
+			return
+		}
+		for _, prepared := range jobs {
+			if prepared.ID == id {
+				job = prepared
+				break
+			}
+		}
+	}
 	writeJSON(w, http.StatusAccepted, job)
 }
 

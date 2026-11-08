@@ -131,7 +131,7 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 		t.Fatal(err)
 	}
 
-	uploadRequest := httptest.NewRequest(http.MethodPost, "/api/tracks", &body)
+	uploadRequest := httptest.NewRequest(http.MethodPost, "/api/uploads/check", &body)
 	uploadRequest.Header.Set("Content-Type", form.FormDataContentType())
 	uploadResponse := httptest.NewRecorder()
 	handler.ServeHTTP(uploadResponse, uploadRequest)
@@ -141,6 +141,14 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 	var queued store.UploadJob
 	if err = json.Unmarshal(uploadResponse.Body.Bytes(), &queued); err != nil {
 		t.Fatal(err)
+	}
+	if queued.Kind != "preflight" || queued.RequiresConfirmation {
+		t.Fatalf("unexpected preflight %#v", queued)
+	}
+	startResponse := httptest.NewRecorder()
+	handler.ServeHTTP(startResponse, httptest.NewRequest(http.MethodPost, "/api/jobs/"+queued.ID+"/resolve", strings.NewReader(`{"overwrite":true,"requestKey":"format-test"}`)))
+	if startResponse.Code != http.StatusNoContent {
+		t.Fatalf("start status=%d body=%s", startResponse.Code, startResponse.Body.String())
 	}
 	job := finishTestJob(t, api, queued.ID, "succeeded")
 	track, err := s.Track(context.Background(), job.TrackID)

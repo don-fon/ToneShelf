@@ -50,6 +50,7 @@ func (a *API) Handler() http.Handler {
 	r.Get("/api/jobs", a.jobs)
 	r.Post("/api/jobs/{jobID}/resolve", a.resolveUpload)
 	r.Post("/api/tracks", a.upload)
+	r.Post("/api/uploads/check", func(w http.ResponseWriter, r *http.Request) { a.receiveJob(w, r, "", true) })
 	r.Patch("/api/tracks/{trackID}", a.updateTrack)
 	r.Delete("/api/tracks/{trackID}", a.deleteTrack)
 	r.Put("/api/tracks/{trackID}/audio", a.replaceAudio)

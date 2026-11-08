@@ -40,7 +40,7 @@ export interface UploadJob {
   id: string
   fileName: string
   requestKey?: string
-  kind?: 'upload' | 'repair'
+  kind?: 'upload' | 'repair' | 'preflight'
   targetTrackId?: string
   trackId?: string
   state: 'receiving' | 'queued' | 'processing' | 'succeeded' | 'failed'

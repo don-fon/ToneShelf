@@ -33,7 +33,10 @@ type UploadJob struct {
 const usageSQL = `(SELECT COALESCE(SUM(size_bytes),0) FROM tracks)+(SELECT COALESCE(SUM(size_bytes),0) FROM pending_file_deletions)+(SELECT COALESCE(SUM(reserved_bytes),0) FROM upload_jobs)`
 
 func (s *Store) CreateJob(ctx context.Context, job UploadJob) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO upload_jobs(id,owner_user_id,file_name,request_key,target_track_id,source_path,output_path,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'receiving',?,?)`, job.ID, DefaultUserID, job.FileName, job.RequestKey, job.TargetTrackID, job.SourcePath, job.OutputPath, nowText(), nowText())
+	if job.Kind == "" {
+		job.Kind = "upload"
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO upload_jobs(id,owner_user_id,file_name,request_key,target_track_id,source_path,output_path,state,created_at,updated_at,kind) VALUES(?,?,?,?,?,?,?,'receiving',?,?,?)`, job.ID, DefaultUserID, job.FileName, job.RequestKey, job.TargetTrackID, job.SourcePath, job.OutputPath, nowText(), nowText(), job.Kind)
 	return err
 }
 
@@ -55,7 +58,7 @@ func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
 			if err = json.Unmarshal([]byte(pending), job.Candidate); err != nil {
 				return nil, err
 			}
-			job.RequiresConfirmation = true
+			job.RequiresConfirmation = job.Kind != "preflight" || job.TargetTrackID != ""
 			job.ConflictTitle = job.Candidate.Title
 		}
 		out = append(out, job)
@@ -210,26 +213,9 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 	}
 	id := track.ID
 	if job.TargetTrackID == "" {
-		rows, queryErr := tx.QueryContext(ctx, `SELECT id,title FROM tracks WHERE owner_user_id=? AND deleted_at IS NULL ORDER BY created_at,id`, DefaultUserID)
+		duplicate, queryErr := duplicateTitle(ctx, tx, track.Title)
 		if queryErr != nil {
 			return Track{}, queryErr
-		}
-		var duplicate string
-		for rows.Next() {
-			var existingID, title string
-			if err = rows.Scan(&existingID, &title); err != nil {
-				rows.Close()
-				return Track{}, err
-			}
-			if strings.EqualFold(strings.TrimSpace(title), strings.TrimSpace(track.Title)) {
-				duplicate = existingID
-				break
-			}
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return Track{}, err
 		}
 		if duplicate != "" {
 			candidate, marshalErr := json.Marshal(track)

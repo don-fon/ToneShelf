@@ -31,10 +31,28 @@ type probeOutput struct {
 	Streams []struct {
 		CodecName string `json:"codec_name"`
 		CodecType string `json:"codec_type"`
+		Channels  int    `json:"channels"`
 	} `json:"streams"`
 }
 
 func New(root string) *Processor { return &Processor{Root: root, FFmpeg: "ffmpeg", FFprobe: "ffprobe"} }
+
+func (p *Processor) InspectTitle(ctx context.Context, path, name string) (string, error) {
+	output, err := exec.CommandContext(ctx, p.FFprobe, "-v", "error", "-show_entries", "format_tags=title:stream=codec_type,channels", "-of", "json", path).Output()
+	if err != nil {
+		return "", fmt.Errorf("无法读取音频标题: %w", err)
+	}
+	var probe probeOutput
+	if err = json.Unmarshal(output, &probe); err != nil {
+		return "", err
+	}
+	for _, stream := range probe.Streams {
+		if stream.CodecType == "audio" && stream.Channels > 0 {
+			return first(probe.Format.Tags, "title", strings.TrimSuffix(name, extension(name))), nil
+		}
+	}
+	return "", errors.New("未找到音频轨道")
+}
 
 type metadata struct {
 	duration    float64
