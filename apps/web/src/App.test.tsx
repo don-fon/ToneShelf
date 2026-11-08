@@ -43,6 +43,34 @@ const renderApp = () => {
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('music library lifecycle', () => {
+  it('previews a manually edited offset and saves the raw lyrics without an offset control', async () => {
+    const lyrics = '[offset:0]\n[00:01]First\n[00:04]Second'
+    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [{ ...track, lyrics }] }])
+    renderApp()
+    fireEvent.click(await screen.findByRole('button', { name: '设置 World is Mine' }))
+    fireEvent.click(screen.getByText('歌词显示'))
+    expect(screen.queryByLabelText('整体偏移（秒）')).toBeNull()
+    const edited = lyrics.replace('[offset:0]', '[offset:-1250]')
+    fireEvent.change(screen.getByLabelText('歌词'), { target: { value: edited } })
+    expect(screen.getByRole('region', { name: '歌词显示预览' }).textContent).toContain('0:02.250')
+    expect(api.updateTrack).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(vi.mocked(api.updateTrack).mock.calls[0]?.[0]).toEqual(expect.objectContaining({ lyrics: edited })))
+  })
+
+  it('saves per-song lyrics interpretation only after the user confirms', async () => {
+    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    renderApp()
+    fireEvent.click(await screen.findByRole('button', { name: '设置 World is Mine' }))
+    expect(screen.queryByText('手动修正时间')).toBeNull()
+    fireEvent.click(screen.getByText('歌词显示'))
+    fireEvent.change(screen.getByLabelText('分组方式'), { target: { value: 'timestamp' } })
+    fireEvent.change(screen.getByLabelText('主行'), { target: { value: 'last' } })
+    expect(api.updateTrack).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(vi.mocked(api.updateTrack).mock.calls[0]?.[0]).toEqual(expect.objectContaining({ id: track.id, lyricsLayout: 'timestamp', lyricsPrimaryLine: 'last' })))
+  })
+
   it('renders an empty library and the trash entry', async () => {
     renderApp()
     expect(await screen.findByText('这里还没有音乐')).toBeTruthy()

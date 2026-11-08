@@ -214,12 +214,14 @@ func (a *API) updateTrack(w http.ResponseWriter, r *http.Request) {
 		PlaybackEndSeconds   *float64 `json:"playbackEndSeconds"`
 		VolumeRatio          float64  `json:"volumeRatio"`
 		Lyrics               string   `json:"lyrics"`
+		LyricsLayout         *string  `json:"lyricsLayout"`
+		LyricsPrimaryLine    *string  `json:"lyricsPrimaryLine"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	t, err := a.Store.UpdateTrack(r.Context(), chi.URLParam(r, "trackID"), in.BaseRandomWeight, in.PlaybackStartSeconds, in.PlaybackEndSeconds, in.VolumeRatio, in.Lyrics, in.Title, in.Artist)
+	t, err := a.Store.UpdateTrack(r.Context(), chi.URLParam(r, "trackID"), in.BaseRandomWeight, in.PlaybackStartSeconds, in.PlaybackEndSeconds, in.VolumeRatio, in.Lyrics, in.Title, in.Artist, in.LyricsLayout, in.LyricsPrimaryLine)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

@@ -1,3 +1,6 @@
+export type LyricsLayout = 'timestamp' | 'separate'
+export type LyricsPrimaryLine = 'first' | 'last'
+
 export interface Track {
   id: string
   title: string
@@ -11,6 +14,8 @@ export interface Track {
   playbackEndSeconds: number | null
   volumeRatio: number
   lyrics: string
+  lyricsLayout?: LyricsLayout
+  lyricsPrimaryLine?: LyricsPrimaryLine
   audioUrl: string
   originalAudioUrl?: string
   originalContentType?: string

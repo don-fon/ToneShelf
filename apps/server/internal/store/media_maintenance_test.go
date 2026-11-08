@@ -41,7 +41,7 @@ func TestOriginalProbeCorrectsBoundsAndRejectsStaleVersion(t *testing.T) {
 			if (got.PlaybackEndSeconds == nil) != (test.wantEnd == nil) || (test.wantEnd != nil && *got.PlaybackEndSeconds != *test.wantEnd) {
 				t.Fatalf("end=%v want=%v", got.PlaybackEndSeconds, test.wantEnd)
 			}
-			if got.Title != old.Title || got.BaseRandomWeight != 2 || got.VolumeRatio != .6 || got.Lyrics != "lyrics" {
+			if got.Title != old.Title || got.BaseRandomWeight != 2 || got.VolumeRatio != .6 || got.Lyrics != "[offset:0]\nlyrics" {
 				t.Fatalf("settings changed: %#v", got)
 			}
 			if err = s.SetOriginalProbe(ctx, old, "audio/aac", 9); err == nil {

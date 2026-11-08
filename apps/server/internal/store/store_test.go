@@ -192,7 +192,7 @@ func TestReplaceTrackPreservesSettingsAndQueuesOldFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replaced.ID != track.ID || replaced.Title != "new" || replaced.AudioVersion != track.AudioVersion+1 || replaced.BaseRandomWeight != 2.5 || replaced.VolumeRatio != .6 || replaced.Lyrics != "lyrics" || replaced.PlaybackStartSeconds != 0 || replaced.PlaybackEndSeconds != nil {
+	if replaced.ID != track.ID || replaced.Title != "new" || replaced.AudioVersion != track.AudioVersion+1 || replaced.BaseRandomWeight != 2.5 || replaced.VolumeRatio != .6 || replaced.Lyrics != "[offset:0]\nlyrics" || replaced.PlaybackStartSeconds != 0 || replaced.PlaybackEndSeconds != nil {
 		t.Fatalf("replacement lost track state: %#v", replaced)
 	}
 	pending, err := s.PendingFiles(ctx)
@@ -227,7 +227,7 @@ func TestDefaultPlaylistAndTrackSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if track.BaseRandomWeight != 2.5 || track.PlaybackEndSeconds == nil || *track.PlaybackEndSeconds != 9 || track.Lyrics != "歌词" {
+	if track.BaseRandomWeight != 2.5 || track.PlaybackEndSeconds == nil || *track.PlaybackEndSeconds != 9 || track.Lyrics != "[offset:0]\n歌词" {
 		t.Fatalf("update failed: %#v", track)
 	}
 	if _, err = s.UpdateTrack(ctx, track.ID, 0, 0, nil, .8, ""); err == nil {

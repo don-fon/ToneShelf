@@ -1,7 +1,10 @@
+import type { LyricsLayout, LyricsPrimaryLine } from '@music/domain'
+
 export interface LyricLine {
   id: string
   timeSeconds: number | null
   text: string
+  secondaryTexts?: string[]
 }
 
 export interface ParsedLyrics {
@@ -9,17 +12,24 @@ export interface ParsedLyrics {
   lines: LyricLine[]
 }
 
-const metadataPattern = /^\[(?:ar|ti|al|by|re|ve|length):/i
+const metadataPattern = /^\[(?:ar|ti|al|by|re|ve|length|ml):/i
 const offsetPattern = /^\[offset:([+-]?\d+)\]$/i
 
-export function parseLyrics(content: string): ParsedLyrics {
+// Positive LRC offsets advance lyrics; negative values delay them.
+export function lyricsOffsetSeconds(content: string): number {
+  let milliseconds = 0
+  for (const raw of content.split(/\r\n|\n|\r/)) {
+    const match = raw.trim().match(offsetPattern)
+    if (match && Number.isSafeInteger(Number(match[1]))) milliseconds = Number(match[1])
+  }
+  return milliseconds === 0 ? 0 : -milliseconds / 1000
+}
+
+export function parseLyrics(content: string, options: { layout?: LyricsLayout; primaryLine?: LyricsPrimaryLine } = {}): ParsedLyrics {
   const timed: Array<LyricLine & { order: number }> = []
   const plain: LyricLine[] = []
-  const sourceLines = content.replace(/^\uFEFF/, '').split(/\r?\n/)
-  const offsetMilliseconds = sourceLines.reduce((current, rawLine) => {
-    const match = rawLine.trim().match(offsetPattern)
-    return match ? Number(match[1]) : current
-  }, 0)
+  const sourceLines = content.replace(/^\uFEFF/, '').split(/\r\n|\n|\r/)
+  const offsetSeconds = lyricsOffsetSeconds(content)
 
   sourceLines.forEach((rawLine, order) => {
     const line = rawLine.trim()
@@ -39,14 +49,37 @@ export function parseLyrics(content: string): ParsedLyrics {
     if (!text) return
     timestamps.forEach((match, index) => {
       const fraction = match[3] ? Number(`0.${match[3].padEnd(3, '0')}`) : 0
-      const seconds = Number(match[1]) * 60 + Number(match[2]) + fraction + offsetMilliseconds / 1000
-      timed.push({ id: `time-${order}-${index}`, timeSeconds: Math.max(0, seconds), text, order })
+      const seconds = Number(match[1]) * 60 + Number(match[2]) + fraction + offsetSeconds
+      timed.push({ id: `time-${order}-${index}`, timeSeconds: seconds, text, order })
     })
   })
 
   if (!timed.length) return { synced: false, lines: plain }
   timed.sort((a, b) => (a.timeSeconds ?? 0) - (b.timeSeconds ?? 0) || a.order - b.order)
-  return { synced: true, lines: timed.map(({ order: _order, ...line }) => line) }
+  if (options.layout === 'separate') {
+    return { synced: true, lines: timed.map(({ order: _order, ...line }) => line) }
+  }
+  const grouped: LyricLine[] = []
+  for (const { order: _order, ...line } of timed) {
+    const previous = grouped.at(-1)
+    if (previous && previous.timeSeconds === line.timeSeconds) {
+      if (line.text !== previous.text && !previous.secondaryTexts?.includes(line.text)) {
+        previous.secondaryTexts = [...(previous.secondaryTexts ?? []), line.text]
+      }
+    } else {
+      grouped.push(line)
+    }
+  }
+  if (options.primaryLine === 'last') {
+    for (const line of grouped) {
+      if (line.secondaryTexts?.length) {
+        const texts = [line.text, ...line.secondaryTexts]
+        line.text = texts.pop()!
+        line.secondaryTexts = texts
+      }
+    }
+  }
+  return { synced: true, lines: grouped }
 }
 
 export function activeLyricIndex(lines: LyricLine[], positionSeconds: number): number {

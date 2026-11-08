@@ -34,6 +34,8 @@ export const api = {
       playbackEndSeconds: track.playbackEndSeconds,
       volumeRatio: track.volumeRatio,
       lyrics: track.lyrics,
+      lyricsLayout: track.lyricsLayout,
+      lyricsPrimaryLine: track.lyricsPrimaryLine,
     }),
   }),
   searchLyrics: (trackID: string) => request<LyricsSearchResult>(`/api/tracks/${trackID}/lyrics/search`),
