@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { LyricsLayout, LyricsPrimaryLine } from '@music/domain'
+import { LyricText } from './LyricText'
 import { activeLyricIndex, parseLyrics } from '@music/player-policy'
 
 interface LyricsViewProps {
@@ -32,10 +33,10 @@ export function LyricsView({ trackTitle, lyrics, layout, primaryLine, position, 
             aria-label={[line.text, ...(line.secondaryTexts ?? [])].join(' ')}
             aria-current={activeIndex >= 0 && line.timeSeconds === parsed.lines[activeIndex].timeSeconds ? 'true' : undefined}
             className={activeIndex >= 0 && line.timeSeconds === parsed.lines[activeIndex].timeSeconds ? 'active' : ''} onClick={() => onSeek(Math.max(0, line.timeSeconds!))}>
-            <span className="lyric-original">{line.text}</span>
-            {line.secondaryTexts?.map((text, secondaryIndex) => <span className="lyric-secondary" key={secondaryIndex}>{text}</span>)}
+            <span className="lyric-original"><LyricText text={line.text} ruby={line.ruby}/></span>
+            {line.secondaryTexts?.map((text, secondaryIndex) => <span className="lyric-secondary" key={secondaryIndex}><LyricText text={text} ruby={line.secondaryRuby?.[secondaryIndex]}/></span>)}
           </button> :
-          <p key={line.id}>{line.text}</p>)}
+          <p key={line.id}><LyricText text={line.text} ruby={line.ruby}/></p>)}
       </div>}
   </section>
 }

@@ -5,6 +5,33 @@ import { LyricsView } from './LyricsView'
 afterEach(cleanup)
 
 describe('LyricsView', () => {
+  it('keeps uniquely aligned kana visible on either the primary or secondary line', () => {
+    const lyrics = '[kana:1やま1かわ]\n[00:01]高山\n[00:01]山\n[00:03]河流\n[00:03]川\n[00:05]尾注'
+    const onSeek = vi.fn()
+    const view = render(<LyricsView trackTitle="song" lyrics={lyrics} position={1} onSeek={onSeek}/>)
+    expect(view.container.querySelector('.lyric-original rt')).toBeNull()
+    expect(view.container.querySelector('.lyric-secondary rt')?.textContent).toBe('やま')
+    view.rerender(<LyricsView trackTitle="song" lyrics={lyrics} primaryLine="last" position={1} onSeek={onSeek}/>)
+    expect(view.container.querySelector('.lyric-original rt')?.textContent).toBe('やま')
+    expect(view.container.querySelector('.lyric-secondary rt')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '川 河流' }))
+    expect(onSeek).toHaveBeenCalledWith(3)
+  })
+
+  it('renders kana above the corresponding text and preserves seeking and group selection', () => {
+    const onSeek = vi.fn()
+    const lyrics = '[kana:1やま1かわ]\n[00:01]山と川\n[00:01]Mountain and river'
+    const view = render(<LyricsView trackTitle="song" lyrics={lyrics} position={1} onSeek={onSeek}/>)
+    expect([...view.container.querySelectorAll('ruby')].map((ruby) => [ruby.firstChild?.textContent, ruby.querySelector('rt')?.textContent])).toEqual([
+      ['山', 'やま'], ['川', 'かわ'],
+    ])
+    fireEvent.click(screen.getByRole('button', { name: '山と川 Mountain and river' }))
+    expect(onSeek).toHaveBeenCalledWith(1)
+    view.rerender(<LyricsView trackTitle="song" lyrics={lyrics} primaryLine="last" position={1} onSeek={onSeek}/>)
+    expect(view.container.querySelector('.lyric-original ruby')).toBeNull()
+    expect(view.container.querySelectorAll('.lyric-secondary rt')).toHaveLength(2)
+  })
+
   it('follows overall offset and clamps seeking before audio start to zero', () => {
     const onSeek = vi.fn()
     const view = render(<LyricsView trackTitle="song" lyrics={'[offset:-1000]\n[00:01]First\n[00:03]Second'} position={1} onSeek={onSeek}/>)
