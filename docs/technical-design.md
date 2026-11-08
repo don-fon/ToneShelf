@@ -78,6 +78,7 @@
 - `playbackEndSeconds`，可为空，表示音频结尾
 - `volumeRatio`，默认 `0.8`
 - `activeAudioVersionId`
+- `original_content_type` 保存探测出的原始容器 MIME，不以扩展名判断；`playback_index_version` 标记兼容副本已验证的索引版本
 - `deletedAt`，为空表示正常歌曲；有值表示位于回收站
 - `purgeEligibleAt`，不得早于 `deletedAt + 72 小时`
 - `createdAt`、`updatedAt`
@@ -227,7 +228,7 @@ HTTP 接口当前约定：`POST /api/tracks` 和 `PUT /api/tracks/{trackID}/audi
 - 无法预先获得文件大小时，应在流式写入过程中分段申请空间；申请失败后立即中止并清理候选文件。
 - 上传通常每次原子预留 4 MiB，在预留额度内连续写入，不再逐 multipart 小块更新 SQLite；接近配额上限时允许按实际剩余额度预留，只要足够覆盖下一次写入。文件同步落盘后，在同一次条件更新中将预留结算为实际接收字节并转为排队状态；中断或写入失败沿用候选文件清理及预留回收机制。配额总和包含歌曲、待删除文件及所有任务预留。转码前按源时长 × 40,000 字节/秒 + 64 KiB 保守预留输出空间，FFmpeg 通过标准输出流写入受控 writer；超出预估时先原子扩容预留，再允许继续写入。完成后同步落盘并探测验证，在激活事务中按实际大小结算。
 
-### 6.1 统一播放副本参数
+### 6.1 统一兼容副本参数
 
 - 文件扩展名：`.mp3`
 - MIME 类型：`audio/mpeg`
@@ -241,6 +242,22 @@ HTTP 接口当前约定：`POST /api/tracks` 和 `PUT /api/tracks/{trackID}/audi
 
 - [Web audio codec guide](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Formats/Audio_codecs)
 - [Media container formats](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Formats/Containers)
+
+### 6.2 原文件优先与时间索引
+
+API 同时返回 `originalAudioUrl`、`originalContentType` 与兼容副本的 `audioUrl`。`/api/tracks/{id}/audio?source=original` 提供原文件，使用探测容器得到的 MIME 并支持 Range；默认音频端点仍提供兼容副本。两者均验证歌曲归属与未删除状态，并携带音频版本标识。
+
+裸 ADTS AAC 不返回可优先选择的 `originalAudioUrl`，避免浏览器按码率估算时长造成进度和拖动异常；原文件仍保留且原始音频端点可用。M4A/MP4 中的 AAC 不受此限制。
+
+Web 音频适配器通过 `canPlayType` 优先选择原文件，不支持时直接使用 MP3；原文件解码失败后最多回退一次，待新来源的元数据就绪后恢复当前位置，保持音量和播放意图。自动播放权限错误不触发格式回退。未设置播放终点时依赖音频原生 `ended` 事件；显式终点才由播放策略截断。
+
+裸 ADTS AAC 的 `ffprobe` 时长可能来自码率估算。探测到 `format_name=aac` 时，额外通过 FFmpeg 完整解码到 null 输出，以最终 `out_time_us` 确定时长；解码失败、取消或缺少有效时长时不得回退到估算值。其他容器保持常规探测流程。
+
+VBR MP3 直接输出到 `pipe:1` 无法回写 Xing 索引。当前先通过受配额控制的 writer 生成 `.stream` 中间文件，再原子预留中间文件大小 + 4 KiB 的重封装空间，将音频包复制到可回写的最终 MP3，补写 Xing/TOC，不二次编码。重封装不复制源元数据或图片，并限制输出长度，为最后一个 MP3 数据包和索引留余量。文件同步落盘后，探测时长与原文件误差必须不超过 150 毫秒；然后清理中间文件，在激活事务中结算最终占用。崩溃或失败时按任务记录清理两份候选文件，清理失败前继续保留预留额度。
+
+迁移 `005_original_playback` 为历史记录补充格式与索引状态。启动恢复完成后及每小时维护时，探测旧记录的原文件 MIME，增加音频版本以作废旧时间轴的会话进度，并为未验证的兼容副本登记 `kind=repair` 后台任务；同一歌曲只允许一个活动修复任务。修复作为内部维护静默执行，不在前端上传任务列表展示，也不计入该列表数量或影响展开状态；任务状态仍可用于更新音频版本和容量缓存。旧副本作为只读输入，候选副本另行预留空间；成功时在同一事务中切换副本、增加音频版本、调整占用、标记索引版本并登记旧副本清理。失败或中断时只清理候选输出，绝不删除仍在使用的修复输入。重启恢复删除未完成输出、释放其预留并重新排队；空间不足时保持旧文件可用，后续维护可重试。修复不修改歌词、歌曲名称、歌手、歌单关系或播放设置。
+
+迁移 `006_accurate_duration` 增加 `duration_probe_version`。新上传及替换音频写入已校准版本；历史裸 AAC（包含已知 MIME 或已修复索引的记录）在启动及维护时重新探测一次，并在事务更新中校准时长、增加音频版本。起点超出新时长时恢复完整播放；仅终点越界时收至新结尾，其他设置保留。更新要求原路径和音频版本仍与探测快照一致，避免覆盖并发替换；失败保留未校准状态以供下次重试。校准先于索引修复排队，旧的失败修复可自动重新排队；再次重启不重复校准。
 
 ## 7. 音频替换流程
 

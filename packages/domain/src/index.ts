@@ -12,6 +12,8 @@ export interface Track {
   volumeRatio: number
   lyrics: string
   audioUrl: string
+  originalAudioUrl?: string
+  originalContentType?: string
   fileName: string
   uploadedAt: string
   audioVersion: number
@@ -31,6 +33,7 @@ export interface UploadJob {
   id: string
   fileName: string
   requestKey?: string
+  kind?: 'upload' | 'repair'
   targetTrackId?: string
   trackId?: string
   state: 'receiving' | 'queued' | 'processing' | 'succeeded' | 'failed'

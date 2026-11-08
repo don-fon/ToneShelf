@@ -21,7 +21,7 @@ func (p *Processor) Process(ctx context.Context, id, name, source, output string
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{ID: id, Title: first(meta.tags, "title", strings.TrimSuffix(name, extension(name))), Artist: first(meta.tags, "artist", ""), Album: first(meta.tags, "album", ""), OriginalPath: source, PlayablePath: source, ContentType: "audio/mpeg", SizeBytes: info.Size(), DurationSeconds: meta.duration}
+	result := Result{ID: id, Title: first(meta.tags, "title", strings.TrimSuffix(name, extension(name))), Artist: first(meta.tags, "artist", ""), Album: first(meta.tags, "album", ""), OriginalPath: source, PlayablePath: source, ContentType: "audio/mpeg", OriginalContentType: meta.contentType, SizeBytes: info.Size(), DurationSeconds: meta.duration}
 	if meta.codec == "mp3" {
 		return result, nil
 	}
@@ -31,7 +31,8 @@ func (p *Processor) Process(ctx context.Context, id, name, source, output string
 	if err = reserve(estimate); err != nil {
 		return Result{}, err
 	}
-	file, err := os.OpenFile(output, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	stream := output + ".stream"
+	file, err := os.OpenFile(stream, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return Result{}, err
 	}
@@ -54,15 +55,15 @@ func (p *Processor) Process(ctx context.Context, id, name, source, output string
 	if closeErr != nil {
 		return Result{}, closeErr
 	}
-	if _, err = p.probe(ctx, output); err != nil {
-		return Result{}, fmt.Errorf("播放副本验证失败: %w", err)
-	}
-	info, err = os.Stat(output)
+	size, err := p.RemuxIndexed(ctx, stream, output, meta.duration, reserve)
 	if err != nil {
 		return Result{}, err
 	}
+	if err = os.Remove(stream); err != nil {
+		return Result{}, err
+	}
 	result.PlayablePath = output
-	result.SizeBytes += info.Size()
+	result.SizeBytes += size
 	return result, nil
 }
 

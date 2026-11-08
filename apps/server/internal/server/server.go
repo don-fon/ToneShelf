@@ -233,7 +233,14 @@ func (a *API) audio(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	f, err := os.Open(t.PlayablePath)
+	path, contentType := t.PlayablePath, t.ContentType
+	if r.URL.Query().Get("source") == "original" {
+		path, contentType = t.OriginalPath, t.OriginalContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -244,9 +251,9 @@ func (a *API) audio(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", t.ContentType)
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, max-age=3600")
-	http.ServeContent(w, r, filepath.Base(t.PlayablePath), info.ModTime(), f)
+	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), f)
 }
 
 func (a *API) quota(w http.ResponseWriter, r *http.Request) {

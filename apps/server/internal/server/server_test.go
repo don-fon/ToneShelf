@@ -151,6 +151,20 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 	if err != nil {
 		t.Fatal(err)
 	}
+	if track.OriginalContentType == "" || (track.OriginalContentType != "audio/aac" && track.OriginalAudioURL == "") || (track.OriginalContentType == "audio/aac" && track.OriginalAudioURL != "") {
+		t.Fatalf("missing original source: %#v", track)
+	}
+	originalRequest := httptest.NewRequest(http.MethodGet, "/api/tracks/"+track.ID+"/audio?source=original", nil)
+	originalRequest.Header.Set("Range", "bytes=0-31")
+	originalResponse := httptest.NewRecorder()
+	handler.ServeHTTP(originalResponse, originalRequest)
+	if originalResponse.Code != http.StatusPartialContent || originalResponse.Header().Get("Content-Type") != track.OriginalContentType {
+		t.Fatalf("original status=%d type=%s", originalResponse.Code, originalResponse.Header().Get("Content-Type"))
+	}
+	originalBytes, err := os.ReadFile(sourcePath)
+	if err != nil || !bytes.Equal(originalResponse.Body.Bytes(), originalBytes[:32]) {
+		t.Fatalf("original bytes differ: %v", err)
+	}
 	if track.ContentType != "audio/mpeg" || filepath.Ext(storedTrack.PlayablePath) != ".mp3" {
 		t.Fatalf("unexpected playable track: %#v", track)
 	}

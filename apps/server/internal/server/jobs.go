@@ -63,10 +63,32 @@ func (a *API) RecoverJobs(ctx context.Context) error {
 			job.State = "failed"
 			a.cleanFailedJob(ctx, job)
 		case "processing":
+			if job.Kind == "repair" {
+				if err = removeCandidate(job.OutputPath); err != nil {
+					if stateErr := a.Store.SetJobState(ctx, job.ID, "processing", "failed", err.Error()); stateErr != nil {
+						return stateErr
+					}
+					continue
+				}
+				if err = a.Store.SetJobReservation(ctx, job.ID, 0); err != nil {
+					return err
+				}
+				if err = a.Store.SetJobState(ctx, job.ID, "processing", "queued", ""); err != nil {
+					return err
+				}
+				continue
+			}
 			// Remove only this job's deterministic candidate output; never
 			// touch files belonging to succeeded jobs.
 			if err = removeCandidate(job.OutputPath); err != nil {
 				if stateErr := a.Store.SetJobState(ctx, job.ID, "processing", "failed", "无法清理未完成的播放副本："+err.Error()); stateErr != nil {
+					return stateErr
+				}
+				a.cleanFailedJob(ctx, job)
+				continue
+			}
+			if err = removeCandidate(job.OutputPath + ".stream"); err != nil {
+				if stateErr := a.Store.SetJobState(ctx, job.ID, "processing", "failed", err.Error()); stateErr != nil {
 					return stateErr
 				}
 				a.cleanFailedJob(ctx, job)
@@ -90,7 +112,11 @@ func (a *API) RecoverJobs(ctx context.Context) error {
 			a.cleanFailedJob(ctx, job)
 		}
 	}
-	return a.reconcileCandidates(ctx)
+	if err = a.reconcileCandidates(ctx); err != nil {
+		return err
+	}
+	a.ScheduleMediaMaintenance(ctx)
+	return nil
 }
 
 // Runs before workers/HTTP start. Only regular files inside the application's
@@ -144,6 +170,10 @@ func canonicalPath(path string) string {
 }
 
 func (a *API) processJob(ctx context.Context, job store.UploadJob) {
+	if job.Kind == "repair" {
+		a.processRepair(ctx, job)
+		return
+	}
 	result, err := a.Media.Process(ctx, job.ID, job.FileName, job.SourcePath, job.OutputPath, func(bytes int64) error { return a.Store.ReserveJob(ctx, job.ID, bytes, a.quotaLimit()) })
 	if ctx.Err() != nil {
 		return
@@ -158,7 +188,7 @@ func (a *API) processJob(ctx context.Context, job store.UploadJob) {
 			}
 		}
 		if err == nil {
-			_, err = a.Store.CompleteJob(ctx, job, store.NewTrack{ID: result.ID, Title: result.Title, Artist: result.Artist, Album: result.Album, FileName: job.FileName, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds}, oldFiles)
+			_, err = a.Store.CompleteJob(ctx, job, store.NewTrack{ID: result.ID, Title: result.Title, Artist: result.Artist, Album: result.Album, FileName: job.FileName, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, OriginalContentType: result.OriginalContentType, PlaybackIndexVersion: 1, DurationProbeVersion: 1, SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds}, oldFiles)
 		}
 	}
 	if err != nil {
@@ -172,7 +202,11 @@ func (a *API) processJob(ctx context.Context, job store.UploadJob) {
 }
 
 func (a *API) cleanFailedJob(ctx context.Context, job store.UploadJob) {
-	for _, path := range []string{job.SourcePath, job.OutputPath} {
+	paths := []string{job.OutputPath, job.OutputPath + ".stream"}
+	if job.Kind != "repair" {
+		paths = append(paths, job.SourcePath)
+	}
+	for _, path := range paths {
 		if err := removeCandidate(path); err != nil {
 			a.logMaintenance("clean failed upload", err)
 			return
@@ -248,6 +282,7 @@ func (a *API) receiveJob(w http.ResponseWriter, r *http.Request, target string) 
 		ext = ".bin"
 	}
 	job := store.UploadJob{ID: id, FileName: part.FileName(), TargetTrackID: target, SourcePath: filepath.Join(a.Media.Root, "media", "originals", id+ext), OutputPath: filepath.Join(a.Media.Root, "media", "playable", id+".mp3"), State: "receiving", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	job.Kind = "upload"
 	if key := r.Header.Get("X-Upload-Key"); len(key) <= 128 {
 		job.RequestKey = key
 	}

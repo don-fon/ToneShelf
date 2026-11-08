@@ -9,6 +9,7 @@ var ErrQuotaExceeded = errors.New("存储空间不足")
 
 type UploadJob struct {
 	ID            string `json:"id"`
+	Kind          string `json:"kind"`
 	FileName      string `json:"fileName"`
 	RequestKey    string `json:"requestKey,omitempty"`
 	TargetTrackID string `json:"targetTrackId,omitempty"`
@@ -31,7 +32,7 @@ func (s *Store) CreateJob(ctx context.Context, job UploadJob) error {
 }
 
 func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, DefaultUserID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,kind,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, DefaultUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +40,7 @@ func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
 	out := make([]UploadJob, 0)
 	for rows.Next() {
 		var job UploadJob
-		if err = rows.Scan(&job.ID, &job.FileName, &job.RequestKey, &job.TargetTrackID, &job.TrackID, &job.SourcePath, &job.OutputPath, &job.State, &job.ReservedBytes, &job.Error, &job.CreatedAt); err != nil {
+		if err = rows.Scan(&job.ID, &job.Kind, &job.FileName, &job.RequestKey, &job.TargetTrackID, &job.TrackID, &job.SourcePath, &job.OutputPath, &job.State, &job.ReservedBytes, &job.Error, &job.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, job)
@@ -129,7 +130,7 @@ func (s *Store) Quota(ctx context.Context) (used, reserved int64, err error) {
 }
 
 func (s *Store) KnownMediaPaths(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT original_path FROM tracks UNION SELECT playable_path FROM tracks UNION SELECT path FROM pending_file_deletions UNION SELECT source_path FROM upload_jobs UNION SELECT output_path FROM upload_jobs`)
+	rows, err := s.db.QueryContext(ctx, `SELECT original_path FROM tracks UNION SELECT playable_path FROM tracks UNION SELECT path FROM pending_file_deletions UNION SELECT source_path FROM upload_jobs UNION SELECT output_path FROM upload_jobs UNION SELECT output_path||'.stream' FROM upload_jobs`)
 	if err != nil {
 		return nil, err
 	}

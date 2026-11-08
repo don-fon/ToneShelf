@@ -14,8 +14,8 @@ const audio = vi.hoisted(() => ({
   pause: vi.fn(),
 }))
 vi.mock('./platform/audio', () => ({ WebAudioEngine: class {
-  constructor() { audio.element = document.createElement('audio') }
-  load(url: string) { audio.load(url) }
+  constructor() { audio.element = document.createElement('audio'); vi.spyOn(audio.element, 'play').mockResolvedValue(undefined) }
+  load(url: string, original?: { url: string; contentType: string }) { if (original) audio.load(url, original); else audio.load(url) }
   seek(seconds: number) { audio.seek(seconds); audio.element!.currentTime = seconds }
   setVolume(value: number) { audio.volume(value) }
   play() { return audio.play() }
@@ -56,6 +56,34 @@ async function setup(playing = true) {
 }
 
 describe('independent playback controls', () => {
+  it('prefers the original source when the server advertises one', async () => {
+    const query = await setup()
+    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, originalAudioUrl: '/original', originalContentType: 'audio/flac' }] }]) })
+    await waitFor(() => expect(audio.load).toHaveBeenCalledWith(track.audioUrl, { url: '/original', contentType: 'audio/flac' }))
+  })
+
+  it('does not cut full-song playback at the stored duration', async () => {
+    await setup()
+    audio.element!.currentTime = 121
+    act(() => { audio.element!.dispatchEvent(new Event('timeupdate')) })
+    expect(usePlayer.getState().trackID).toBe('song')
+    expect(usePlayer.getState().position).toBe(121)
+    expect(audio.seek).not.toHaveBeenCalled()
+    expect(audio.pause).not.toHaveBeenCalled()
+  })
+
+  it('still loops a user-defined playback interval at its endpoint', async () => {
+    const query = await setup()
+    act(() => {
+      usePlayer.setState({ mode: 'repeat-one' })
+      query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, playbackEndSeconds: 60 }] }])
+    })
+    await waitFor(() => expect(document.querySelector<HTMLInputElement>('.controls input')!.max).toBe('60'))
+    vi.clearAllMocks()
+    audio.element!.currentTime = 61
+    act(() => { audio.element!.dispatchEvent(new Event('timeupdate')) })
+    expect(audio.element!.currentTime).toBe(5)
+  })
   it.each([true, false])('changes global volume without seeking or restarting (playing=%s)', async (playing) => {
     await setup(playing)
     fireEvent.change(document.querySelector<HTMLInputElement>('.volume input')!, { target: { value: '.5' } })

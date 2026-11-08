@@ -40,14 +40,15 @@ export function App() {
   useEffect(() => { if (active && !player.playlistID) player.selectPlaylist(active.id) }, [active, player])
   useEffect(() => {
     if (!current) return
-    engine.load(current.audioUrl)
+    if (current.originalAudioUrl && current.originalContentType) engine.load(current.audioUrl, { url: current.originalAudioUrl, contentType: current.originalContentType })
+    else engine.load(current.audioUrl)
     const start = current.playbackStartSeconds
     const end = current.playbackEndSeconds ?? current.durationSeconds
     const versionChanged = player.audioVersion !== current.audioVersion
     const target = !versionChanged && player.position >= start && player.position < end ? player.position : start
     if (versionChanged) player.setAudioVersion(current.audioVersion)
     engine.seek(target); setPosition(target)
-  }, [engine, current?.id, current?.audioVersion, current?.audioUrl])
+  }, [engine, current?.id, current?.audioVersion, current?.audioUrl, current?.originalAudioUrl, current?.originalContentType])
 
   useEffect(() => {
     if (current) engine.setVolume(player.masterVolume * current.volumeRatio)
@@ -61,7 +62,7 @@ export function App() {
     }
     if (player.playing) engine.play().catch(() => player.setPlaying(false))
     else engine.pause()
-  }, [engine, current?.id, current?.audioVersion, current?.audioUrl, player.playing])
+  }, [engine, current?.id, current?.audioVersion, current?.audioUrl, current?.originalAudioUrl, current?.originalContentType, player.playing])
 
   const playTrack = (track: Track) => player.selectTrack(track.id, advanceRecovery(player.recovery, track.id), track.audioVersion)
   const next = () => {
@@ -74,8 +75,8 @@ export function App() {
     const audio = engine.element()
     const onTime = () => {
       if (!current) return
-      const end = current.playbackEndSeconds ?? current.durationSeconds
-      if (audio.currentTime >= end) {
+      const end = current.playbackEndSeconds
+      if (end !== null && audio.currentTime >= end) {
         if (player.mode === 'repeat-one') { audio.currentTime = current.playbackStartSeconds; void audio.play() }
         else next()
         return
@@ -83,9 +84,11 @@ export function App() {
       setPosition(audio.currentTime); player.setPosition(audio.currentTime)
     }
     const onEnded = () => player.mode === 'repeat-one' && current ? (audio.currentTime = current.playbackStartSeconds, void audio.play()) : next()
+    const onError = () => { if (audio.error) player.setPlaying(false) }
     audio.addEventListener('timeupdate', onTime); audio.addEventListener('ended', onEnded)
-    return () => { audio.removeEventListener('timeupdate', onTime); audio.removeEventListener('ended', onEnded) }
-  }, [current?.id, player.mode, active?.id, player.recovery])
+    audio.addEventListener('error', onError)
+    return () => { audio.removeEventListener('timeupdate', onTime); audio.removeEventListener('ended', onEnded); audio.removeEventListener('error', onError) }
+  }, [current?.id, current?.audioVersion, current?.playbackStartSeconds, current?.playbackEndSeconds, current?.durationSeconds, player.mode, active?.id, player.recovery])
 
   const create = useMutation({ mutationFn: api.createPlaylist, onSuccess: refresh })
   const save = useMutation({ mutationFn: api.updateTrack, onSuccess: async () => { await refresh(); setEditing(null) } })

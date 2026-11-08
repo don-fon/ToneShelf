@@ -53,6 +53,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				api.ScheduleMediaMaintenance(ctx)
 				api.Maintain(ctx)
 			}
 		}

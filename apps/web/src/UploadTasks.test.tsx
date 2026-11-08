@@ -13,6 +13,25 @@ const renderTasks = () => {
 }
 
 describe('upload task UI', () => {
+  it.each(['queued', 'processing', 'succeeded', 'failed'] as const)('hides internal repair tasks in state %s', async (state) => {
+    vi.mocked(api.jobs).mockResolvedValue([{ id: 'repair', kind: 'repair', fileName: 'internal.mp3', targetTrackId: 'song', state, reservedBytes: 0, createdAt: '' }])
+    const { client } = renderTasks()
+    await waitFor(() => expect(client.getQueryState(['jobs'])?.status).toBe('success'))
+    expect(screen.queryByText('internal.mp3')).toBeNull()
+    expect(document.querySelector('.upload-tasks')).toBeNull()
+  })
+
+  it('counts only user uploads and replacements alongside internal repairs', async () => {
+    vi.mocked(api.jobs).mockResolvedValue([
+      { id: 'repair', kind: 'repair', fileName: 'internal.mp3', state: 'processing', reservedBytes: 0, createdAt: '' },
+      { id: 'replacement', kind: 'upload', targetTrackId: 'song', fileName: 'replacement.flac', state: 'queued', reservedBytes: 0, createdAt: '' },
+    ])
+    renderTasks()
+    expect(await screen.findByText('replacement.flac')).toBeTruthy()
+    expect(screen.getByText('（替换音频）')).toBeTruthy()
+    expect(document.querySelector('.upload-tasks summary span')?.textContent).toBe('1')
+    expect(screen.queryByText('internal.mp3')).toBeNull()
+  })
   it('stops polling after the active task succeeds', async () => {
     vi.useFakeTimers()
     const job: UploadJob = { id: 'active', fileName: 'active.aac', state: 'processing', reservedBytes: 1, createdAt: '' }

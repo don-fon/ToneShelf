@@ -45,11 +45,12 @@ export function UploadTasks() {
       })
     }
   }
-  const pending = local.filter((item) => !jobs.some((job) => job.id === item.jobID || (job.requestKey === item.id && job.state !== 'receiving')))
-  const visibleJobs = jobs.filter((job) => job.state !== 'receiving' || !pending.some((item) => item.id === job.requestKey))
+  const userJobs = jobs.filter((job) => job.kind !== 'repair')
+  const pending = local.filter((item) => !userJobs.some((job) => job.id === item.jobID || (job.requestKey === item.id && job.state !== 'receiving')))
+  const visibleJobs = userJobs.filter((job) => job.state !== 'receiving' || !pending.some((item) => item.id === job.requestKey))
   return <>
     <input className="upload-input" id="music-upload" aria-label="上传音乐文件" type="file" multiple accept={audioAccept} onChange={(event) => { select(Array.from(event.target.files ?? [])); event.target.value = '' }}/>
-    {(pending.length > 0 || jobs.length > 0 || error) && <details className="upload-tasks" open={pending.length > 0 || jobs.some((job) => ['receiving', 'queued', 'processing', 'failed'].includes(job.state))}>
+    {(pending.length > 0 || visibleJobs.length > 0 || error) && <details className="upload-tasks" open={pending.length > 0 || visibleJobs.some((job) => ['receiving', 'queued', 'processing', 'failed'].includes(job.state))}>
       <summary>上传任务 <span>{pending.length + visibleJobs.length}</span></summary>
       {error && <p className="error">无法获取任务状态：{error.message}</p>}
       <div className="upload-task-list">
