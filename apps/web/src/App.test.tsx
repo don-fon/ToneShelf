@@ -43,6 +43,17 @@ const renderApp = () => {
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('music library lifecycle', () => {
+  it('hides same-title album repetition while keeping distinct album information', async () => {
+    const repeated = { ...track, id: 'repeated', title: '嘘の火花', artist: '96猫', album: ' 嘘の火花 ' }
+    const distinct = { ...track, id: 'distinct', title: 'あなたに出会わなければ', artist: 'Aimer', album: 'Sleepless Nights' }
+    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [repeated, distinct] }])
+    renderApp()
+    const first = await screen.findByText(repeated.title)
+    expect(first.closest('.track')?.querySelector('small')?.textContent).toBe('96猫')
+    expect(screen.getAllByText(repeated.title)).toHaveLength(1)
+    expect(screen.getByText(distinct.title).closest('.track')?.querySelector('small')?.textContent).toBe('Aimer · Sleepless Nights')
+  })
+
   it('previews a manually edited offset and saves the raw lyrics without an offset control', async () => {
     const lyrics = '[offset:0]\n[00:01]First\n[00:04]Second'
     vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [{ ...track, lyrics }] }])
