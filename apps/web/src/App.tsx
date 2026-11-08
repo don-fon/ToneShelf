@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Track } from '@music/domain'
 import { advanceRecovery, selectNext, sortTracks } from '@music/player-policy'
@@ -32,6 +32,9 @@ export function App() {
   const [position, setPosition] = useState(player.position)
   const [playlistName, setPlaylistName] = useState('')
   const [showTrash, setShowTrash] = useState(false)
+  const [mobileView, setMobileView] = useState<'songs' | 'lyrics'>('songs')
+  const [showQuota, setShowQuota] = useState(false)
+  const quotaRef = useRef<HTMLDivElement>(null)
   const [sortBy, setSortBy] = useState<'uploadedAt' | 'fileName'>('uploadedAt')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [showSort, setShowSort] = useState(false)
@@ -43,6 +46,15 @@ export function App() {
     query.invalidateQueries({ queryKey: ['trash'] }),
   ])
   const report = (reason: unknown) => window.alert(reason instanceof Error ? reason.message : String(reason))
+
+  useEffect(() => {
+    if (!showQuota) return
+    const close = (event: PointerEvent) => {
+      if (!quotaRef.current?.contains(event.target as Node)) setShowQuota(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [showQuota])
 
   useEffect(() => { if (active && !player.playlistID) player.selectPlaylist(active.id) }, [active, player])
   useEffect(() => {
@@ -115,17 +127,24 @@ export function App() {
       <header><span className="mark">♫</span><div><strong>音乐空间</strong><small>你的私人播放站</small></div></header>
       <nav>{playlists.map((playlist) => <button className={!showTrash && playlist.id === active?.id ? 'active' : ''} key={playlist.id} onClick={() => { setShowTrash(false); player.selectPlaylist(playlist.id) }}><span>{playlist.isDefault ? '♥' : '≡'}</span>{playlist.name}<em>{playlist.tracks.length}</em></button>)}<button className={showTrash ? 'active' : ''} onClick={() => setShowTrash(true)}><span>♻</span>回收站<em>{trash.length}</em></button></nav>
       <form className="new-list" onSubmit={(event) => { event.preventDefault(); if (playlistName.trim()) { create.mutate(playlistName.trim()); setPlaylistName('') } }}><input value={playlistName} onChange={(event) => setPlaylistName(event.target.value)} placeholder="新建歌单"/><button>＋</button></form>
-      <div className="sidebar-status">
+      <div className="sidebar-status" onClick={() => setShowQuota(false)}>
         <UploadTasks/>
-      <div className="quota" title={quota?.reservedBytes ? `含处理中预留 ${bytes(quota.reservedBytes)}` : undefined}><b>已用 {bytes((quota?.usedBytes ?? 0) + (quota?.reservedBytes ?? 0))} / {bytes(quota?.limitBytes)}</b><i><u style={{ width: `${Math.min(100, (((quota?.usedBytes ?? 0) + (quota?.reservedBytes ?? 0)) / (quota?.limitBytes || 1)) * 100)}%` }}/></i></div>
+      </div>
+      <div className="quota-disclosure" ref={quotaRef} data-open={showQuota} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowQuota(false) }} onKeyDown={(event) => { if (event.key === 'Escape') { setShowQuota(false); quotaRef.current?.querySelector('button')?.focus() } }}>
+        <button className="quota-toggle" type="button" aria-label="存储空间" title="存储空间" aria-expanded={showQuota} aria-controls="storage-quota" onClick={() => { setShowQuota(!showQuota); const tasks = document.querySelector<HTMLDetailsElement>('.sidebar-status .upload-tasks'); if (tasks) tasks.open = false }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 14h18M16 17h2"/></svg></button>
+        <div id="storage-quota" className="quota" title={quota?.reservedBytes ? `含处理中预留 ${bytes(quota.reservedBytes)}` : undefined}><b>已用 {bytes((quota?.usedBytes ?? 0) + (quota?.reservedBytes ?? 0))} / {bytes(quota?.limitBytes)}</b><i><u style={{ width: `${Math.min(100, (((quota?.usedBytes ?? 0) + (quota?.reservedBytes ?? 0)) / (quota?.limitBytes || 1)) * 100)}%` }}/></i></div>
       </div>
     </aside>
 
-    <main>{showTrash ? <>
+    <main className={showTrash ? 'trash-main' : 'music-main'}>{showTrash ? <>
       <section className="hero"><div><small>音乐库维护</small><h1>回收站</h1><p>歌曲至少保留 3 天；到期后由服务器自动清理。</p></div></section>
       <section className="trash-list">{trash.map((track) => <article key={track.id}><div><strong>{track.title}</strong><small>{track.artist || '未知艺术家'} · 预计清理：{track.purgeEligibleAt ? new Date(track.purgeEligibleAt).toLocaleString() : '待定'}</small>{track.purgeError && <small className="error">上次清理失败，服务器会重试</small>}</div><button onClick={() => api.restoreTrack(track.id).then(refresh).catch(report)}>恢复</button></article>)}{!trash.length && <div className="empty"><b>回收站是空的</b></div>}</section>
     </> : <>
+      <div className="view-switch" role="group" aria-label="播放视图"><button type="button" aria-pressed={mobileView === 'songs'} onClick={() => setMobileView('songs')}>歌曲</button><button type="button" aria-pressed={mobileView === 'lyrics'} onClick={() => setMobileView('lyrics')}>歌词</button></div>
+      <div className="music-workspace" data-view={mobileView}>
+      <div className="library-pane">
       <section className="hero"><div><small>当前歌单</small><div className="playlist-title"><h1>{active?.name ?? '默认歌单'}</h1><span className="track-count">{active?.tracks.length ?? 0} 首音乐</span></div>{active && !active.isDefault && <span className="playlist-actions"><button onClick={async () => { const name = window.prompt('歌单名称', active.name)?.trim(); if (name) { try { await api.renamePlaylist(active.id, name); await refresh() } catch (reason) { report(reason) } } }}>重命名</button><button onClick={async () => { if (!window.confirm(`删除歌单“${active.name}”？歌曲本身不会被删除。`)) return; try { await api.deletePlaylist(active.id); player.selectPlaylist(playlists.find((playlist) => playlist.isDefault)?.id ?? ''); await refresh() } catch (reason) { report(reason) } }}>删除歌单</button></span>}</div><label className="upload" htmlFor="music-upload">上传音乐</label></section>
+      <div className="list-scroll" role="region" aria-label="歌曲列表" tabIndex={0}>
       <section className="tracks"><div className="track heading"><span>#</span><span>歌曲</span><span>时长</span><div className="sort-tools" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowSort(false) }} onKeyDown={(event) => { if (event.key === 'Escape') { setShowSort(false); event.currentTarget.querySelector('button')?.focus() } }}>
         <button className="sort-toggle" aria-label="排序" title="排序" aria-expanded={showSort} aria-controls="track-sort-options" onClick={() => setShowSort(!showSort)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h12M4 12h8M4 18h4M18 10v10m-3-3 3 3 3-3"/></svg></button>
         {showSort && <div id="track-sort-options" className="sort-options" role="group" aria-label="排序选项">{(['uploadedAt', 'fileName'] as const).flatMap((field) => (['asc', 'desc'] as const).map((direction) => <button key={field + direction} aria-pressed={sortBy === field && sortDirection === direction} onClick={() => { setSortBy(field); setSortDirection(direction); setShowSort(false) }}>{field === 'uploadedAt' ? '上传时间' : '文件名'} · {direction === 'asc' ? '正序' : '逆序'}</button>))}</div>}
@@ -134,7 +153,9 @@ export function App() {
         {!active?.tracks.length && <div className="empty"><b>这里还没有音乐</b><span>上传一个音频文件开始播放</span></div>}
       </section>
       {active && !active.isDefault && library.length > 0 && <details className="add"><summary>从音乐库添加歌曲</summary>{library.filter((track) => !active.tracks.some((item) => item.id === track.id)).map((track) => <button key={track.id} onClick={() => api.addTrack(active.id, track.id).then(refresh).catch(report)}>＋ {track.title}</button>)}</details>}
-      <LyricsView trackTitle={current?.title} lyrics={current?.lyrics ?? ''} layout={current?.lyricsLayout} primaryLine={current?.lyricsPrimaryLine} position={position} onSeek={(seconds) => { engine.seek(seconds); setPosition(seconds); player.setPosition(seconds) }}/>
+      </div></div>
+      {current ? <LyricsView viewKey={mobileView} trackTitle={current.title} lyrics={current.lyrics} layout={current.lyricsLayout} primaryLine={current.lyricsPrimaryLine} position={position} onSeek={(seconds) => { engine.seek(seconds); setPosition(seconds); player.setPosition(seconds) }}/> : <section className="lyrics-panel lyrics-placeholder" aria-label="播放歌词"><span>♫</span><p>选择一首音乐，查看歌词</p></section>}
+      </div>
     </>}</main>
 
     {editing && <div className="modal"><form className="song-settings" role="dialog" aria-modal="true" aria-labelledby="song-settings-title" onSubmit={(event) => { event.preventDefault(); save.mutate(editing) }}>

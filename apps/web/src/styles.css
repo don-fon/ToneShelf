@@ -65,3 +65,81 @@
 @media(max-width:560px){.modal form{padding:16px;gap:10px}.settings-identity{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:10px}.settings-playback{grid-template-columns:minmax(0,1fr);gap:10px}.settings-tuning{grid-template-columns:110px minmax(0,1fr);gap:10px}.song-settings input:not([type=range]){font-size:16px;min-height:40px}.song-settings textarea{font-size:16px}.song-settings .actions button{min-height:40px}}
 .track>div:not(.track-actions){min-width:0}.track strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}.track small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .upload-task.upload-conflict{display:grid;gap:6px}.upload-conflict>div{min-width:0}.upload-conflict-actions{display:flex;gap:8px;margin-top:6px}.upload-conflict-actions button{border:1px solid #d8d1c9;border-radius:6px;background:#fffcf8;color:#9c5c40;padding:5px 12px}.upload-conflict-actions button:disabled{opacity:.5}
+
+.shell{height:100dvh;min-height:0;overflow:hidden}
+.music-main,.trash-main{height:100%;min-height:0;min-width:0;max-width:none;padding:28px;overflow:hidden}
+.music-main{display:flex;flex-direction:column;gap:16px}
+.music-workspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:24px}
+.library-pane{display:flex;flex-direction:column;min-height:0;min-width:0}
+.library-pane .hero{flex-shrink:0;flex-wrap:wrap;gap:12px;padding-bottom:16px}
+.library-pane .hero>div{min-width:0;flex:1}
+.library-pane .hero h1{font-size:32px}
+.library-pane .playlist-title{flex-wrap:wrap;gap:4px 12px}
+.library-pane .upload{flex-shrink:0;padding:10px 14px;white-space:nowrap}
+.list-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.list-scroll .tracks{margin-top:12px}
+.list-scroll .track{gap:8px;padding-right:4px;padding-left:4px}
+.list-scroll .track.heading{position:sticky;top:0;z-index:3;background:#f6f3ee}
+.list-scroll .add{margin:16px 0}
+.list-scroll .empty{padding:48px 12px}
+.music-workspace>.lyrics-panel{margin:0;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:20px}
+.music-workspace .lyrics-panel header{flex-shrink:0;gap:12px;min-width:0;align-items:start}
+.music-workspace .lyrics-panel header>div{min-width:0}
+.music-workspace .lyrics-panel h2{font-size:18px;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.music-workspace .lyrics-panel header>span{flex-shrink:0;font-size:11px}
+.music-workspace .lyrics-scroll{flex:1;min-height:0;height:auto;max-height:none;overscroll-behavior:contain;scrollbar-gutter:stable;padding:var(--lyrics-edge,96px) 0}
+.music-workspace .lyrics-scroll.plain{padding:24px 8px}
+.music-workspace .lyrics-empty{margin:auto;padding:24px 12px}
+.music-workspace>.lyrics-placeholder{align-items:center;justify-content:center;color:#aaa19a}
+.lyrics-placeholder>span{font-size:40px;color:#bd795d}
+.lyrics-placeholder p{font-size:14px}
+.trash-main{overflow:auto;overscroll-behavior:contain}
+.view-switch{display:none}
+aside nav{min-height:0;overflow:auto;overscroll-behavior:contain}
+@media(max-width:1100px){
+  .music-main{padding:20px}
+  .music-workspace{grid-template-columns:minmax(0,1fr)}
+  .view-switch{display:flex;flex-shrink:0;gap:4px;width:max-content;padding:3px;background:#eae4dd;border-radius:9px}
+  .view-switch button{border:0;border-radius:7px;padding:7px 22px;background:transparent;color:#82766d}
+  .view-switch button[aria-pressed=true]{background:#fffcf8;color:#a75632;box-shadow:0 1px 4px #302c2910}
+  .music-workspace[data-view=songs]>.lyrics-panel,.music-workspace[data-view=lyrics]>.library-pane{display:none}
+}
+@media(max-width:800px){
+  .shell{display:flex;flex-direction:column;padding-bottom:122px}
+  .shell>aside{flex-shrink:0;padding:12px 16px}
+  .shell>aside header{padding-bottom:10px}
+  .music-main,.trash-main{flex:1;height:auto;padding:12px 16px;min-height:0}
+  .music-main{gap:12px}
+  .library-pane .hero h1{font-size:28px}
+  .music-workspace>.lyrics-panel{padding:16px}
+}
+@media(max-width:800px) and (max-height:500px){.shell>aside header{display:none}.shell>aside{padding:6px 12px}.music-main{gap:8px;padding:8px 12px}}
+.quota-toggle{display:none}
+.quota-disclosure{flex-shrink:0}
+.quota-disclosure .quota{margin-top:0;padding:10px 12px}
+@media(max-width:800px){
+  .shell>aside{position:relative}
+  .shell>aside header{padding-right:80px}
+  .shell>aside nav{padding-right:80px}
+  .quota-disclosure{position:absolute;right:16px;top:16px;z-index:8}
+  .quota-toggle{display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:#aaa29a}
+  .quota-toggle:hover,.quota-toggle[aria-expanded=true]{background:#3a3531;color:#eee8df}
+  .quota-disclosure .quota{display:none;position:absolute;top:42px;right:0;width:240px;padding:14px;background:#332e2a;border:1px solid #49423d;border-radius:9px;box-shadow:0 6px 20px #0002}
+  .quota-disclosure[data-open=true] .quota{display:grid}
+  .sidebar-status:not(:has(.upload-tasks)){display:none}
+}
+@media(max-width:800px) and (max-height:500px){.quota-disclosure{top:8px;right:12px}}
+.upload-task-icon{display:none}.upload-task-label{font-weight:inherit}
+@media(max-width:800px){
+  .sidebar-status{left:auto;right:60px;top:16px;bottom:auto;width:36px;padding:0;background:transparent;border:0;box-shadow:none}
+  .sidebar-status .upload-tasks{position:relative;margin:0;padding:0;background:transparent;border:0}
+  .sidebar-status .upload-tasks summary{position:relative;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:8px;list-style:none;color:#aaa29a}
+  .sidebar-status .upload-tasks summary::-webkit-details-marker{display:none}
+  .sidebar-status .upload-tasks summary:hover,.sidebar-status .upload-tasks[open] summary{background:#3a3531;color:#eee8df}
+  .sidebar-status .upload-task-label{display:none}
+  .sidebar-status .upload-task-icon{display:block}
+  .sidebar-status .upload-tasks summary>span{position:absolute;right:-3px;top:-3px;min-width:16px;padding:1px 4px;border-radius:8px;background:#9c5c40;color:#fff;font-size:10px;text-align:center;margin:0}
+  .sidebar-status .upload-task-content{position:absolute;right:-44px;top:42px;width:min(300px,calc(100vw - 32px));padding:12px;background:#332e2a;border:1px solid #49423d;border-radius:9px;box-shadow:0 6px 20px #0002}
+  .sidebar-status .upload-task-list{margin:0;max-height:min(240px,40dvh)}
+}
+@media(max-width:800px) and (max-height:500px){.sidebar-status{top:8px;right:56px}}
