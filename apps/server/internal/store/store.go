@@ -130,6 +130,12 @@ func (s *Store) seed(ctx context.Context) error {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+func (s *Store) PlaylistExists(ctx context.Context, id string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_user_id=?)`, id, DefaultUserID).Scan(&exists)
+	return exists, err
+}
+
 func (s *Store) Playlists(ctx context.Context) ([]Playlist, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id,name,is_default FROM playlists WHERE owner_user_id=? ORDER BY is_default DESC, created_at`, DefaultUserID)
 	if err != nil {

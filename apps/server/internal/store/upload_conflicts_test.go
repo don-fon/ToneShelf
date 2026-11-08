@@ -9,10 +9,13 @@ import (
 	"time"
 )
 
-func prepareConflictJob(t *testing.T, s *Store, id, title string) (UploadJob, NewTrack) {
+func prepareConflictJob(t *testing.T, s *Store, id, title string, playlistID ...string) (UploadJob, NewTrack) {
 	t.Helper()
 	ctx := context.Background()
 	job := UploadJob{ID: id, FileName: id + ".flac", SourcePath: id + ".flac", OutputPath: id + ".mp3"}
+	if len(playlistID) > 0 {
+		job.PlaylistID = playlistID[0]
+	}
 	for _, err := range []error{s.CreateJob(ctx, job), s.ReserveJob(ctx, id, 100, 10000), s.SetJobState(ctx, id, "receiving", "queued", ""), s.SetJobState(ctx, id, "queued", "processing", "")} {
 		if err != nil {
 			t.Fatal(err)

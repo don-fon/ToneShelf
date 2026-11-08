@@ -13,6 +13,7 @@ var ErrUploadConflict = errors.New("存在同名歌曲，需要确认覆盖")
 type UploadJob struct {
 	ID                   string    `json:"id"`
 	Kind                 string    `json:"kind"`
+	PlaylistID           string    `json:"playlistId,omitempty"`
 	FileName             string    `json:"fileName"`
 	RequestKey           string    `json:"requestKey,omitempty"`
 	TargetTrackID        string    `json:"targetTrackId,omitempty"`
@@ -36,12 +37,12 @@ func (s *Store) CreateJob(ctx context.Context, job UploadJob) error {
 	if job.Kind == "" {
 		job.Kind = "upload"
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO upload_jobs(id,owner_user_id,file_name,request_key,target_track_id,source_path,output_path,state,created_at,updated_at,kind) VALUES(?,?,?,?,?,?,?,'receiving',?,?,?)`, job.ID, DefaultUserID, job.FileName, job.RequestKey, job.TargetTrackID, job.SourcePath, job.OutputPath, nowText(), nowText(), job.Kind)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO upload_jobs(id,owner_user_id,file_name,request_key,target_track_id,source_path,output_path,state,created_at,updated_at,kind,playlist_id) VALUES(?,?,?,?,?,?,?,'receiving',?,?,?,?)`, job.ID, DefaultUserID, job.FileName, job.RequestKey, job.TargetTrackID, job.SourcePath, job.OutputPath, nowText(), nowText(), job.Kind, job.PlaylistID)
 	return err
 }
 
 func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,kind,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at,pending_candidate FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, DefaultUserID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,kind,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at,pending_candidate,playlist_id FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, DefaultUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +51,7 @@ func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
 	for rows.Next() {
 		var job UploadJob
 		var pending string
-		if err = rows.Scan(&job.ID, &job.Kind, &job.FileName, &job.RequestKey, &job.TargetTrackID, &job.TrackID, &job.SourcePath, &job.OutputPath, &job.State, &job.ReservedBytes, &job.Error, &job.CreatedAt, &pending); err != nil {
+		if err = rows.Scan(&job.ID, &job.Kind, &job.FileName, &job.RequestKey, &job.TargetTrackID, &job.TrackID, &job.SourcePath, &job.OutputPath, &job.State, &job.ReservedBytes, &job.Error, &job.CreatedAt, &pending, &job.PlaylistID); err != nil {
 			return nil, err
 		}
 		if pending != "" && job.State == "queued" {
@@ -189,8 +190,9 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 	}
 	defer tx.Rollback()
 	var state string
+	var playlistID string
 	var reserved int64
-	if err = tx.QueryRowContext(ctx, `SELECT state,reserved_bytes FROM upload_jobs WHERE id=? AND owner_user_id=?`, job.ID, DefaultUserID).Scan(&state, &reserved); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT state,reserved_bytes,playlist_id FROM upload_jobs WHERE id=? AND owner_user_id=?`, job.ID, DefaultUserID).Scan(&state, &reserved, &playlistID); err != nil {
 		return Track{}, err
 	}
 	if state != expected || track.SizeBytes > reserved {
@@ -232,6 +234,13 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 			return Track{}, ErrUploadConflict
 		}
 		err = insertTrackTx(ctx, tx, track)
+		if err == nil && playlistID != "" && playlistID != DefaultPlaylistID {
+			var exists bool
+			err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_user_id=?)`, playlistID, DefaultUserID).Scan(&exists)
+			if err == nil && exists {
+				err = addTrackTx(ctx, tx, playlistID, track.ID, job.ID+"-upload-playlist")
+			}
+		}
 	} else {
 		id = job.TargetTrackID
 		err = replaceTrackTx(ctx, tx, id, track, oldFiles)

@@ -335,6 +335,21 @@ func (a *API) resolveUpload(w http.ResponseWriter, r *http.Request) {
 // Each request receives one file; clients can issue any number in parallel.
 // The HTTP lifetime only covers reception, not probing or transcoding.
 func (a *API) receiveJob(w http.ResponseWriter, r *http.Request, target string, preflight ...bool) {
+	playlistID := ""
+	if target == "" {
+		playlistID = r.URL.Query().Get("playlistId")
+		if playlistID != "" {
+			exists, err := a.Store.PlaylistExists(r.Context(), playlistID)
+			if err != nil {
+				a.fail(w, err)
+				return
+			}
+			if !exists {
+				writeError(w, http.StatusNotFound, errors.New("上传目标歌单不存在"))
+				return
+			}
+		}
+	}
 	if target != "" {
 		if _, err := a.Store.Track(r.Context(), target); err != nil {
 			http.NotFound(w, r)
@@ -363,6 +378,7 @@ func (a *API) receiveJob(w http.ResponseWriter, r *http.Request, target string, 
 	}
 	job := store.UploadJob{ID: id, FileName: part.FileName(), TargetTrackID: target, SourcePath: filepath.Join(a.Media.Root, "media", "originals", id+ext), OutputPath: filepath.Join(a.Media.Root, "media", "playable", id+".mp3"), State: "receiving", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	job.Kind = "upload"
+	job.PlaylistID = playlistID
 	checking := len(preflight) > 0 && preflight[0]
 	if checking {
 		job.Kind = "preflight"

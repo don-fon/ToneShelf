@@ -8,12 +8,24 @@ import { createUploadKey, uploadSession } from './platform/upload-session'
 
 vi.mock('./api', () => ({ api: { jobs: vi.fn().mockResolvedValue([]), upload: vi.fn(), prepareUpload: vi.fn(), resolveUpload: vi.fn() } }))
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.useRealTimers(); vi.resetAllMocks(); vi.mocked(api.jobs).mockResolvedValue([]) })
-const renderTasks = () => {
+const renderTasks = (playlistID?: string) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return { ...render(<QueryClientProvider client={client}><UploadTasks/></QueryClientProvider>), client }
+  return { ...render(<QueryClientProvider client={client}><UploadTasks playlistID={playlistID}/></QueryClientProvider>), client }
 }
 
 describe('upload task UI', () => {
+  it('captures the playlist at file selection even if the user switches during precheck', async () => {
+    let ready!: (job: UploadJob) => void
+    vi.mocked(api.prepareUpload).mockImplementation(() => new Promise((resolve) => { ready = resolve }))
+    const view = renderTasks('playlist-a')
+    fireEvent.change(screen.getByLabelText('上传音乐文件'), { target: { files: [new File(['audio'], 'new.flac')] } })
+    expect(vi.mocked(api.prepareUpload).mock.calls[0][2]).toBe('playlist-a')
+    view.rerender(<QueryClientProvider client={view.client}><UploadTasks playlistID="playlist-b"/></QueryClientProvider>)
+    await act(async () => { ready({ id: 'prepared', playlistId: 'playlist-a', kind: 'preflight', fileName: 'new.flac', state: 'queued', reservedBytes: 1, createdAt: '' }) })
+    expect(api.prepareUpload).toHaveBeenCalledTimes(1)
+    expect(api.resolveUpload).toHaveBeenCalledWith('prepared', true, expect.any(String))
+  })
+
   it('refreshes the accepted task even when the initial history request is still pending', async () => {
     let initial!: (jobs: UploadJob[]) => void
     const prepared: UploadJob = { id: 'prepared', kind: 'preflight', fileName: 'new.flac', state: 'queued', reservedBytes: 1, createdAt: '' }

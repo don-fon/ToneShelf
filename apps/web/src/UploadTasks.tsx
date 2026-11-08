@@ -10,7 +10,7 @@ type LocalUpload = { id: string; name: string; progress: number; error?: string;
 let nextCheckID = 0
 const labels = { receiving: '上传中', queued: '等待处理', processing: '处理中', succeeded: '成功', failed: '失败' }
 
-export function UploadTasks() {
+export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
   const query = useQueryClient()
   const sessionCount = useSyncExternalStore(uploadSession.subscribe, uploadSession.count)
   const [local, setLocal] = useState<LocalUpload[]>([])
@@ -69,7 +69,7 @@ export function UploadTasks() {
     for (const file of files) {
       const id = nextCheckID++
       setChecking((items) => [...items, { id, name: file.name, progress: 0 }])
-      void api.prepareUpload(file, (progress) => setChecking((items) => items.map((item) => item.id === id ? { ...item, progress } : item))).then(async (job) => {
+      void api.prepareUpload(file, (progress) => setChecking((items) => items.map((item) => item.id === id ? { ...item, progress } : item)), playlistID).then(async (job) => {
         if (job.requiresConfirmation) setConflicts((items) => [...items, job])
         else await enqueue(job)
       }).catch((reason: unknown) => {

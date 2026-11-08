@@ -24,7 +24,7 @@ export const api = {
   resolveUpload: (jobID: string, overwrite: boolean, requestKey?: string) => request<void>(`/api/jobs/${jobID}/resolve`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ overwrite, requestKey }),
   }),
-  prepareUpload: (file: File, onProgress?: (percent: number) => void) => uploadFile('/api/uploads/check', file, onProgress),
+  prepareUpload: (file: File, onProgress?: (percent: number) => void, playlistID?: string) => uploadFile(`/api/uploads/check${playlistID ? `?playlistId=${encodeURIComponent(playlistID)}` : ''}`, file, onProgress),
   upload: (file: File, onProgress?: (percent: number) => void, requestKey?: string) => uploadFile('/api/tracks', file, onProgress, requestKey),
   replaceAudio: (trackID: string, file: File) => {
     const data = new FormData(); data.append('file', file)

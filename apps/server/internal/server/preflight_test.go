@@ -56,6 +56,9 @@ func TestUploadPreflightBeforeVisibleTasks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if _, err = s.CreatePlaylist(ctx, "source-playlist", "Source"); err != nil {
+				t.Fatal(err)
+			}
 			var body bytes.Buffer
 			form := multipart.NewWriter(&body)
 			name := "different-file.flac"
@@ -77,7 +80,7 @@ func TestUploadPreflightBeforeVisibleTasks(t *testing.T) {
 				t.Fatal(err)
 			}
 			form.Close()
-			request := httptest.NewRequest(http.MethodPost, "/api/uploads/check", &body)
+			request := httptest.NewRequest(http.MethodPost, "/api/uploads/check?playlistId=source-playlist", &body)
 			request.Header.Set("Content-Type", form.FormDataContentType())
 			response := httptest.NewRecorder()
 			api.Handler().ServeHTTP(response, request)
@@ -105,7 +108,7 @@ func TestUploadPreflightBeforeVisibleTasks(t *testing.T) {
 			if err = json.Unmarshal(response.Body.Bytes(), &prepared); err != nil {
 				t.Fatal(err)
 			}
-			if prepared.Kind != "preflight" || prepared.RequiresConfirmation != (mode != "new") {
+			if prepared.Kind != "preflight" || prepared.RequiresConfirmation != (mode != "new") || prepared.PlaylistID != "source-playlist" {
 				t.Fatalf("prepared %#v", prepared)
 			}
 			jobs, err := s.Jobs(ctx)
@@ -179,6 +182,21 @@ func TestUploadPreflightBeforeVisibleTasks(t *testing.T) {
 							t.Fatal("old version not cleaned")
 						}
 					}
+					playlists, err := s.Playlists(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, playlist := range playlists {
+						if playlist.ID == "source-playlist" {
+							want := 0
+							if mode == "new" {
+								want = 1
+							}
+							if len(playlist.Tracks) != want {
+								t.Fatalf("source playlist %#v want=%d", playlist, want)
+							}
+						}
+					}
 					return
 				}
 			}
@@ -194,5 +212,24 @@ func TestUploadPreflightBeforeVisibleTasks(t *testing.T) {
 				t.Fatalf("old changed %#v %v", current, err)
 			}
 		})
+	}
+}
+
+func TestPreflightRejectsMissingPlaylistBeforeReceiving(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	api := &API{Store: s}
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/uploads/check?playlistId=missing", strings.NewReader("")))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status %d %s", response.Code, response.Body.String())
+	}
+	jobs, err := s.Jobs(ctx)
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("created jobs %#v %v", jobs, err)
 	}
 }

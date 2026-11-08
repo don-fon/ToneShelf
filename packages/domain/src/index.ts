@@ -35,6 +35,7 @@ export interface Playlist {
 }
 
 export interface UploadJob {
+  playlistId?: string
   requiresConfirmation?: boolean
   conflictTitle?: string
   id: string
