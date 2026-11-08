@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Track } from '@music/domain'
 import { App } from './App'
@@ -23,6 +23,7 @@ vi.mock('./api', () => ({ api: {
   removeTrack: vi.fn().mockResolvedValue({ trackDeleted: true }),
   updateTrack: vi.fn().mockResolvedValue({}),
   restoreTrack: vi.fn().mockResolvedValue({}),
+  addTrack: vi.fn().mockResolvedValue(undefined),
 } }))
 
 vi.mock('./player-store', () => ({ usePlayer: () => ({
@@ -40,9 +41,74 @@ const renderApp = () => {
   return render(<QueryClientProvider client={client}><App /></QueryClientProvider>)
 }
 
-afterEach(() => { cleanup(); vi.clearAllMocks() })
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
+  it('adds selected songs to another playlist and skips songs already present', async () => {
+    const second = { ...track, id: 'second', title: 'Second' }
+    vi.mocked(api.playlists).mockResolvedValueOnce([
+      { id: 'default', name: '默认歌单', isDefault: true, tracks: [track, second] },
+      { id: 'target', name: '目标歌单', isDefault: false, tracks: [track] },
+      { id: 'included', name: '已有歌单', isDefault: false, tracks: [track, second] },
+    ])
+    renderApp()
+    const add = await screen.findByRole('button', { name: '添加到' })
+    expect((add as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByText('从音乐库添加歌曲')).toBeNull()
+    fireEvent.click(screen.getByLabelText('全选歌曲'))
+    fireEvent.click(add)
+    expect(screen.getByRole('dialog', { name: '添加到歌单' }).textContent).toContain('已选择 2 首')
+    expect((within(screen.getByRole('dialog')).getByRole('button', { name: /已有歌单/ }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /目标歌单/ }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(api.addTrack).toHaveBeenCalledExactlyOnceWith('target', 'second')
+    expect(api.removeTrack).not.toHaveBeenCalled()
+    expect(screen.getByRole('status').textContent).toContain('已添加 1 首到“目标歌单”')
+  })
+
+  it('adds a song back to the default playlist from an ordinary playlist', async () => {
+    vi.mocked(api.playlists).mockResolvedValueOnce([
+      { id: 'source', name: '普通歌单', isDefault: false, tracks: [track] },
+      { id: 'default', name: '默认歌单', isDefault: true, tracks: [] },
+    ])
+    renderApp()
+    fireEvent.click(await screen.findByLabelText('选择 World is Mine'))
+    fireEvent.click(screen.getByRole('button', { name: '添加到' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /默认歌单/ }))
+    await waitFor(() => expect(api.addTrack).toHaveBeenCalledExactlyOnceWith('default', track.id))
+    expect(api.removeTrack).not.toHaveBeenCalled()
+  })
+
+  it('keeps failed selections for retry after a partial batch failure', async () => {
+    const second = { ...track, id: 'second', title: 'Second' }
+    const source = { id: 'default', name: '默认歌单', isDefault: true, tracks: [track, second] }
+    const target = { id: 'target', name: '目标歌单', isDefault: false, tracks: [] as Track[] }
+    vi.mocked(api.playlists).mockResolvedValueOnce([source, target]).mockResolvedValueOnce([source, { ...target, tracks: [track] }])
+    vi.mocked(api.addTrack).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('failed'))
+    renderApp()
+    fireEvent.click(await screen.findByLabelText('全选歌曲'))
+    fireEvent.click(screen.getByRole('button', { name: '添加到' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /目标歌单/ }))
+    expect((await screen.findByRole('alert')).textContent).toContain('已添加 1 首，1 首失败')
+    expect((screen.getByLabelText('选择 Second') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByLabelText('选择 World is Mine') as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /目标歌单/ }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(vi.mocked(api.addTrack).mock.calls).toEqual([['target', track.id], ['target', 'second'], ['target', 'second']])
+  })
+
+  it('explains when no other playlist exists and allows cancelling', async () => {
+    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    renderApp()
+    fireEvent.click(await screen.findByLabelText('选择 World is Mine'))
+    fireEvent.click(screen.getByRole('button', { name: '添加到' }))
+    expect(screen.getByText('请先在侧栏创建另一个歌单。')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect((screen.getByLabelText('选择 World is Mine') as HTMLInputElement).checked).toBe(true)
+    expect(api.addTrack).not.toHaveBeenCalled()
+  })
+
   it('hides same-title album repetition while keeping distinct album information', async () => {
     const repeated = { ...track, id: 'repeated', title: '嘘の火花', artist: '96猫', album: ' 嘘の火花 ' }
     const distinct = { ...track, id: 'distinct', title: 'あなたに出会わなければ', artist: 'Aimer', album: 'Sleepless Nights' }

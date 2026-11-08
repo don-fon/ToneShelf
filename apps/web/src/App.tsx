@@ -38,14 +38,42 @@ export function App() {
   const [sortBy, setSortBy] = useState<'uploadedAt' | 'fileName'>('uploadedAt')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [showSort, setShowSort] = useState(false)
+  const [selectedTrackIDs, setSelectedTrackIDs] = useState<string[]>([])
+  const [showAddTo, setShowAddTo] = useState(false)
+  const [addingTo, setAddingTo] = useState<string | null>(null)
+  const [transferError, setTransferError] = useState('')
+  const [transferMessage, setTransferMessage] = useState('')
   const visibleTracks = useMemo(() => sortTracks(active?.tracks ?? [], sortBy, sortDirection), [active?.tracks, sortBy, sortDirection])
-  const library = useMemo(() => playlists.find((playlist) => playlist.isDefault)?.tracks ?? [], [playlists])
+  const selectedTracks = (active?.tracks ?? []).filter((track) => selectedTrackIDs.includes(track.id))
   const refresh = () => Promise.all([
     query.invalidateQueries({ queryKey: ['playlists'] }),
     query.invalidateQueries({ queryKey: ['quota'] }),
     query.invalidateQueries({ queryKey: ['trash'] }),
   ])
   const report = (reason: unknown) => window.alert(reason instanceof Error ? reason.message : String(reason))
+
+  useEffect(() => { setSelectedTrackIDs([]); setShowAddTo(false); setTransferError(''); setTransferMessage('') }, [active?.id, showTrash])
+
+  const addTo = async (playlistID: string) => {
+    const target = playlists.find((playlist) => playlist.id === playlistID)
+    if (!target || addingTo) return
+    const missing = selectedTracks.filter((track) => !target.tracks.some((item) => item.id === track.id))
+    if (!missing.length) return
+    setAddingTo(playlistID); setTransferError(''); setTransferMessage('')
+    try {
+      const results = await Promise.allSettled(missing.map((track) => api.addTrack(playlistID, track.id)))
+      const failed = missing.filter((_, index) => results[index].status === 'rejected')
+      await refresh()
+      if (failed.length) {
+        setSelectedTrackIDs(failed.map((track) => track.id))
+        setTransferError(`已添加 ${missing.length - failed.length} 首，${failed.length} 首失败，请重试。`)
+      } else {
+        setSelectedTrackIDs([]); setShowAddTo(false)
+        setTransferMessage(`已添加 ${missing.length} 首到“${target.name}”`)
+      }
+    } catch (reason) { setTransferError(reason instanceof Error ? reason.message : '添加失败，请重试') }
+    finally { setAddingTo(null) }
+  }
 
   useEffect(() => {
     if (!showQuota) return
@@ -144,19 +172,24 @@ export function App() {
       <div className="music-workspace" data-view={mobileView}>
       <div className="library-pane">
       <section className="hero"><div><small>当前歌单</small><div className="playlist-title"><h1>{active?.name ?? '默认歌单'}</h1><span className="track-count">{active?.tracks.length ?? 0} 首音乐</span></div>{active && !active.isDefault && <span className="playlist-actions"><button onClick={async () => { const name = window.prompt('歌单名称', active.name)?.trim(); if (name) { try { await api.renamePlaylist(active.id, name); await refresh() } catch (reason) { report(reason) } } }}>重命名</button><button onClick={async () => { if (!window.confirm(`删除歌单“${active.name}”？歌曲本身不会被删除。`)) return; try { await api.deletePlaylist(active.id); player.selectPlaylist(playlists.find((playlist) => playlist.isDefault)?.id ?? ''); await refresh() } catch (reason) { report(reason) } }}>删除歌单</button></span>}</div><label className="upload" htmlFor="music-upload">上传音乐</label></section>
+      <div className="playlist-transfer"><button type="button" disabled={!selectedTracks.length || addingTo !== null} onClick={() => { setTransferError(''); setShowAddTo(true) }}>添加到</button>{selectedTracks.length > 0 && <span>已选 {selectedTracks.length} 首</span>}{transferMessage && <span role="status">{transferMessage}</span>}</div>
       <div className="list-scroll" role="region" aria-label="歌曲列表" tabIndex={0}>
-      <section className="tracks"><div className="track heading"><span>#</span><span>歌曲</span><span>时长</span><div className="sort-tools" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowSort(false) }} onKeyDown={(event) => { if (event.key === 'Escape') { setShowSort(false); event.currentTarget.querySelector('button')?.focus() } }}>
+      <section className="tracks"><div className="track heading"><input type="checkbox" aria-label="全选歌曲" disabled={!visibleTracks.length || addingTo !== null} checked={visibleTracks.length > 0 && selectedTracks.length === visibleTracks.length} ref={(input) => { if (input) input.indeterminate = selectedTracks.length > 0 && selectedTracks.length < visibleTracks.length }} onChange={(event) => setSelectedTrackIDs(event.target.checked ? visibleTracks.map((track) => track.id) : [])}/><span>歌曲</span><span>时长</span><div className="sort-tools" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowSort(false) }} onKeyDown={(event) => { if (event.key === 'Escape') { setShowSort(false); event.currentTarget.querySelector('button')?.focus() } }}>
         <button className="sort-toggle" aria-label="排序" title="排序" aria-expanded={showSort} aria-controls="track-sort-options" onClick={() => setShowSort(!showSort)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h12M4 12h8M4 18h4M18 10v10m-3-3 3 3 3-3"/></svg></button>
         {showSort && <div id="track-sort-options" className="sort-options" role="group" aria-label="排序选项">{(['uploadedAt', 'fileName'] as const).flatMap((field) => (['asc', 'desc'] as const).map((direction) => <button key={field + direction} aria-pressed={sortBy === field && sortDirection === direction} onClick={() => { setSortBy(field); setSortDirection(direction); setShowSort(false) }}>{field === 'uploadedAt' ? '上传时间' : '文件名'} · {direction === 'asc' ? '正序' : '逆序'}</button>))}</div>}
       </div></div>
-        {visibleTracks.map((track) => <div className={`track ${current?.id === track.id ? 'playing' : ''}`} key={track.id}><button className="play" onClick={() => current?.id === track.id && player.playing ? player.setPlaying(false) : playTrack(track)}>{current?.id === track.id && player.playing ? 'Ⅱ' : '▶'}</button><div><strong title={track.title}>{track.title}</strong><small>{trackSubtitle(track)}</small></div><span>{time(track.durationSeconds)}</span><div className="track-actions"><button className="remove-track" aria-label={`从歌单移除 ${track.title}`} title="从歌单移除" onClick={() => void remove(track)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6"/></svg></button><button className="edit" aria-label={`设置 ${track.title}`} title="歌曲设置" onClick={() => { lyricsSearch.reset(); setSelectedLyricsID(null); setEditing({ ...track }) }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none"/></svg></button></div></div>)}
+        {visibleTracks.map((track) => <div className={`track ${current?.id === track.id ? 'playing' : ''}`} key={track.id}><div className="track-leading"><input type="checkbox" aria-label={`选择 ${track.title}`} disabled={addingTo !== null} checked={selectedTrackIDs.includes(track.id)} onChange={(event) => setSelectedTrackIDs((ids) => event.target.checked ? [...ids, track.id] : ids.filter((id) => id !== track.id))}/><button className="play" onClick={() => current?.id === track.id && player.playing ? player.setPlaying(false) : playTrack(track)}>{current?.id === track.id && player.playing ? 'Ⅱ' : '▶'}</button></div><div><strong title={track.title}>{track.title}</strong><small>{trackSubtitle(track)}</small></div><span>{time(track.durationSeconds)}</span><div className="track-actions"><button className="remove-track" aria-label={`从歌单移除 ${track.title}`} title="从歌单移除" onClick={() => void remove(track)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6"/></svg></button><button className="edit" aria-label={`设置 ${track.title}`} title="歌曲设置" onClick={() => { lyricsSearch.reset(); setSelectedLyricsID(null); setEditing({ ...track }) }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none"/></svg></button></div></div>)}
         {!active?.tracks.length && <div className="empty"><b>这里还没有音乐</b><span>上传一个音频文件开始播放</span></div>}
       </section>
-      {active && !active.isDefault && library.length > 0 && <details className="add"><summary>从音乐库添加歌曲</summary>{library.filter((track) => !active.tracks.some((item) => item.id === track.id)).map((track) => <button key={track.id} onClick={() => api.addTrack(active.id, track.id).then(refresh).catch(report)}>＋ {track.title}</button>)}</details>}
       </div></div>
       {current ? <LyricsView viewKey={mobileView} trackTitle={current.title} lyrics={current.lyrics} layout={current.lyricsLayout} primaryLine={current.lyricsPrimaryLine} position={position} onSeek={(seconds) => { engine.seek(seconds); setPosition(seconds); player.setPosition(seconds) }}/> : <section className="lyrics-panel lyrics-placeholder" aria-label="播放歌词"><span>♫</span><p>选择一首音乐，查看歌词</p></section>}
       </div>
     </>}</main>
+
+    {showAddTo && <div className="modal"><form className="add-to-dialog" role="dialog" aria-modal="true" aria-labelledby="add-to-title" onSubmit={(event) => event.preventDefault()} onKeyDown={(event) => { if (event.key === 'Escape' && !addingTo) setShowAddTo(false) }}><h2 id="add-to-title">添加到歌单</h2><p>已选择 {selectedTracks.length} 首歌曲</p><div className="add-to-targets">{playlists.filter((playlist) => playlist.id !== active?.id).map((playlist) => {
+      const missing = selectedTracks.filter((track) => !playlist.tracks.some((item) => item.id === track.id)).length
+      return <button type="button" key={playlist.id} disabled={addingTo !== null || !missing} onClick={() => void addTo(playlist.id)}><span>{playlist.name}</span><small>{addingTo === playlist.id ? '正在添加…' : missing ? `添加 ${missing} 首` : '已全部包含'}</small></button>
+    })}{playlists.filter((playlist) => playlist.id !== active?.id).length === 0 && <p className="add-to-empty">请先在侧栏创建另一个歌单。</p>}</div>{transferError && <p className="error" role="alert">{transferError}</p>}<div className="add-to-actions"><button type="button" disabled={addingTo !== null} onClick={() => setShowAddTo(false)}>取消</button></div></form></div>}
 
     {editing && <div className="modal"><form className="song-settings" role="dialog" aria-modal="true" aria-labelledby="song-settings-title" onSubmit={(event) => { event.preventDefault(); save.mutate(editing) }}>
       <h2 id="song-settings-title">歌曲设置</h2>
