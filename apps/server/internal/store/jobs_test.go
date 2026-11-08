@@ -9,6 +9,47 @@ import (
 	"testing"
 )
 
+func TestDeleteCancelledJobRequiresCompletedCleanup(t *testing.T) {
+	for _, state := range []string{"receiving", "queued", "processing", "succeeded", "failed"} {
+		t.Run(state, func(t *testing.T) {
+			ctx := context.Background()
+			s := openTestStore(t)
+			if err := s.CreateJob(ctx, UploadJob{ID: "job", FileName: "file", SourcePath: "source", OutputPath: "output"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.ReserveJob(ctx, "job", 10, 100); err != nil {
+				t.Fatal(err)
+			}
+			if state != "receiving" {
+				if err := s.SetJobState(ctx, "job", "receiving", state, "已取消"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.DeleteCancelledJob(ctx, "job"); err != nil {
+				t.Fatal(err)
+			}
+			jobs, err := s.Jobs(ctx)
+			if err != nil || len(jobs) != 1 {
+				t.Fatalf("deleted before cleanup %#v %v", jobs, err)
+			}
+			if err = s.SetJobReservation(ctx, "job", 0); err != nil {
+				t.Fatal(err)
+			}
+			if err = s.DeleteCancelledJob(ctx, "job"); err != nil {
+				t.Fatal(err)
+			}
+			jobs, err = s.Jobs(ctx)
+			want := 1
+			if state == "failed" {
+				want = 0
+			}
+			if err != nil || len(jobs) != want {
+				t.Fatalf("jobs %#v want %d err %v", jobs, want, err)
+			}
+		})
+	}
+}
+
 func TestConcurrentReservationsNeverExceedQuota(t *testing.T) {
 	ctx := context.Background()
 	s := openTestStore(t)

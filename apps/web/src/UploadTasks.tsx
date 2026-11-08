@@ -77,12 +77,13 @@ export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
       }).finally(() => { setChecking((items) => items.filter((item) => item.id !== id)); void query.invalidateQueries({ queryKey: ['quota'] }) })
     }
   }
-  const userJobs = jobs.filter((job) => job.kind !== 'repair' && job.kind !== 'preflight')
+  const userJobs = jobs.filter((job) => job.kind !== 'repair' && job.kind !== 'preflight' && !(job.state === 'failed' && job.error === '已取消'))
   const resolve = async (id: string, overwrite: boolean) => {
     setDeciding((items) => [...items, id])
     setDecisionError('')
     try {
       await api.resolveUpload(id, overwrite)
+      if (!overwrite) setLocal((items) => items.filter((item) => item.jobID !== id))
       await Promise.all(['jobs', 'playlists', 'quota'].map((key) => query.invalidateQueries({ queryKey: [key] })))
     } catch (reason) {
       setDecisionError(reason instanceof Error ? reason.message : '操作失败，请重试')
@@ -90,7 +91,7 @@ export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
       setDeciding((items) => items.filter((item) => item !== id))
     }
   }
-  const pending = local.filter((item) => !userJobs.some((job) => job.id === item.jobID || (job.requestKey === item.id && job.state !== 'receiving')))
+  const pending = local.filter((item) => !jobs.some((job) => job.id === item.jobID || (job.requestKey === item.id && job.state !== 'receiving')))
   const visibleJobs = userJobs.filter((job) => job.state !== 'receiving' || !pending.some((item) => item.id === job.requestKey))
   return <>
     <input className="upload-input" id="music-upload" aria-label="上传音乐文件" type="file" multiple accept={audioAccept} onChange={(event) => { select(Array.from(event.target.files ?? [])); event.target.value = '' }}/>
@@ -106,7 +107,7 @@ export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
       {decisionError && <p className="error" role="alert">{decisionError}</p>}
       <div className="upload-task-list">
         {pending.map((item) => <div className="upload-task" key={item.id}><span>{item.name}</span><small className={item.error ? 'error' : ''}>{item.error || `上传中 ${item.progress}%`}</small></div>)}
-        {visibleJobs.map((job) => <div className={`upload-task ${job.requiresConfirmation ? 'upload-conflict' : ''}`} key={job.id}><span>{job.fileName}{job.targetTrackId && !job.requiresConfirmation && <small>（替换音频）</small>}</span>{job.requiresConfirmation ? <div><small>已存在“{job.conflictTitle}”，覆盖音频？</small><div className="upload-conflict-actions"><button type="button" disabled={deciding.includes(job.id)} onClick={() => void resolve(job.id, true)}>覆盖</button><button type="button" disabled={deciding.includes(job.id)} onClick={() => void resolve(job.id, false)}>取消</button></div></div> : <small className={job.state === 'failed' ? 'error' : ''}>{job.error === '已取消' ? '已取消' : labels[job.state]}{job.error && job.error !== '已取消' ? `：${job.error}` : ''}</small>}</div>)}
+        {visibleJobs.map((job) => <div className={`upload-task ${job.requiresConfirmation ? 'upload-conflict' : ''}`} key={job.id}><span>{job.fileName}{job.targetTrackId && !job.requiresConfirmation && <small>（替换音频）</small>}</span>{job.requiresConfirmation ? <div><small>已存在“{job.conflictTitle}”，覆盖音频？</small><div className="upload-conflict-actions"><button type="button" disabled={deciding.includes(job.id)} onClick={() => void resolve(job.id, true)}>覆盖</button><button type="button" disabled={deciding.includes(job.id)} onClick={() => void resolve(job.id, false)}>取消</button></div></div> : <small className={job.state === 'failed' ? 'error' : ''}>{labels[job.state]}{job.error ? `：${job.error}` : ''}</small>}</div>)}
       </div>
       </div>
     </details>}

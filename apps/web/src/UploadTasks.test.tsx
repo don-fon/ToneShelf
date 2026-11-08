@@ -14,6 +14,31 @@ const renderTasks = (playlistID?: string) => {
 }
 
 describe('upload task UI', () => {
+  it('hides legacy cancellations while keeping real failure diagnostics', async () => {
+    vi.mocked(api.jobs).mockResolvedValue([
+      { id: 'cancelled', fileName: 'cancelled.mp3', targetTrackId: 'song', state: 'failed', error: '已取消', reservedBytes: 100, createdAt: '' },
+      { id: 'failed', fileName: 'failed.mp3', state: 'failed', error: '转码失败', reservedBytes: 0, createdAt: '' },
+    ])
+    renderTasks()
+    expect(await screen.findByText('失败：转码失败')).toBeTruthy()
+    expect(screen.queryByText('cancelled.mp3')).toBeNull()
+    expect(screen.queryByText('已取消')).toBeNull()
+  })
+
+  it('does not resurrect a local upload row after a fallback conflict is cancelled and deleted', async () => {
+    const prepared: UploadJob = { id: 'prepared', fileName: 'new.mp3', kind: 'preflight', state: 'queued', reservedBytes: 1, createdAt: '' }
+    vi.mocked(api.prepareUpload).mockResolvedValue(prepared)
+    vi.mocked(api.resolveUpload).mockImplementation(async (_id, overwrite, key) => {
+      vi.mocked(api.jobs).mockResolvedValue(overwrite ? [{ ...prepared, kind: 'upload', requestKey: key, requiresConfirmation: true, conflictTitle: 'song', targetTrackId: 'old' }] : [])
+    })
+    const view = renderTasks()
+    await waitFor(() => expect(view.client.getQueryState(['jobs'])?.status).toBe('success'))
+    fireEvent.change(screen.getByLabelText('上传音乐文件'), { target: { files: [new File(['audio'], 'new.mp3')] } })
+    fireEvent.click(await screen.findByRole('button', { name: '取消' }))
+    await waitFor(() => expect(document.querySelector('.upload-tasks')).toBeNull())
+    expect(screen.queryByText('上传中 100%')).toBeNull()
+  })
+
   it('captures the playlist at file selection even if the user switches during precheck', async () => {
     let ready!: (job: UploadJob) => void
     vi.mocked(api.prepareUpload).mockImplementation(() => new Promise((resolve) => { ready = resolve }))
@@ -109,7 +134,8 @@ describe('upload task UI', () => {
     expect(await screen.findByText('已存在“同名歌”，覆盖音频？')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: overwrite ? '覆盖' : '取消' }))
     await waitFor(() => expect(api.resolveUpload).toHaveBeenCalledWith('duplicate', overwrite))
-    expect(await screen.findByText(overwrite ? '成功' : '已取消')).toBeTruthy()
+    if (overwrite) expect(await screen.findByText('成功')).toBeTruthy()
+    else await waitFor(() => expect(screen.queryByText('different.flac')).toBeNull())
     expect(screen.queryByRole('button', { name: '覆盖' })).toBeNull()
     expect(api.upload).not.toHaveBeenCalled()
   })

@@ -163,7 +163,7 @@ func TestDuplicateUploadDecisionAndRecovery(t *testing.T) {
 				}
 			}
 			jobs, _ = s.Jobs(ctx)
-			if jobs[0].RequiresConfirmation || jobs[0].ReservedBytes != 0 {
+			if (!overwrite && len(jobs) != 0) || (overwrite && (len(jobs) != 1 || jobs[0].RequiresConfirmation || jobs[0].ReservedBytes != 0)) {
 				t.Fatalf("unfinished %#v", jobs)
 			}
 			used, reserved, err := s.Quota(ctx)
@@ -192,7 +192,11 @@ func TestDuplicateUploadDecisionAndRecovery(t *testing.T) {
 				}
 			}
 			response = resolve()
-			if response.Code != http.StatusConflict {
+			wantStatus := http.StatusConflict
+			if !overwrite {
+				wantStatus = http.StatusNotFound
+			}
+			if response.Code != wantStatus {
 				t.Fatalf("double decision %d", response.Code)
 			}
 			response = httptest.NewRecorder()

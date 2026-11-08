@@ -226,6 +226,10 @@ func (a *API) cleanFailedJob(ctx context.Context, job store.UploadJob) {
 	}
 	if err := a.Store.SetJobReservation(ctx, job.ID, 0); err != nil {
 		a.logMaintenance("release upload reservation", err)
+		return
+	}
+	if err := a.Store.DeleteCancelledJob(ctx, job.ID); err != nil {
+		a.logMaintenance("delete cancelled upload", err)
 	}
 }
 
@@ -253,7 +257,7 @@ func (a *API) jobs(w http.ResponseWriter, r *http.Request) {
 	visible := make([]store.UploadJob, 0)
 	completed := 0
 	for _, job := range jobs {
-		if job.Kind == "preflight" {
+		if job.Kind == "preflight" || (job.State == "failed" && job.Error == "已取消") {
 			continue
 		}
 		if job.State == "succeeded" || job.State == "failed" {

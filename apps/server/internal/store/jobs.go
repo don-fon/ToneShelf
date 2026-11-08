@@ -10,6 +10,11 @@ import (
 var ErrQuotaExceeded = errors.New("存储空间不足")
 var ErrUploadConflict = errors.New("存在同名歌曲，需要确认覆盖")
 
+func (s *Store) DeleteCancelledJob(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM upload_jobs WHERE id=? AND owner_user_id=? AND state='failed' AND error='已取消' AND reserved_bytes=0`, id, DefaultUserID)
+	return err
+}
+
 type UploadJob struct {
 	ID                   string    `json:"id"`
 	Kind                 string    `json:"kind"`

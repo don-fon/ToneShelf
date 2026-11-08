@@ -27,7 +27,7 @@ func (a *API) Maintain(ctx context.Context) {
 				}
 			}
 		}
-		if job.State == "failed" && job.ReservedBytes > 0 {
+		if job.State == "failed" && (job.ReservedBytes > 0 || job.Error == "已取消") {
 			a.cleanFailedJob(ctx, job)
 		}
 	}
