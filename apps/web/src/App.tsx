@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Track } from '@music/domain'
 import { advanceRecovery, selectNext, sortTracks } from '@music/player-policy'
@@ -19,7 +19,7 @@ export function App() {
   const player = usePlayer()
   const active = playlists.find((playlist) => playlist.id === player.playlistID) ?? playlists[0]
   const current = active?.tracks.find((track) => track.id === player.trackID) ?? null
-  const engine = useRef(new WebAudioEngine()).current
+  const [engine] = useState(() => new WebAudioEngine())
   const [editing, setEditing] = useState<Track | null>(null)
   const [selectedLyricsID, setSelectedLyricsID] = useState<number | null>(null)
   const [position, setPosition] = useState(player.position)
@@ -39,22 +39,29 @@ export function App() {
 
   useEffect(() => { if (active && !player.playlistID) player.selectPlaylist(active.id) }, [active, player])
   useEffect(() => {
-    if (!current) {
-      engine.pause()
-      if (player.playing) player.setPlaying(false)
-      return
-    }
+    if (!current) return
     engine.load(current.audioUrl)
-    engine.setVolume(player.masterVolume * current.volumeRatio)
     const start = current.playbackStartSeconds
     const end = current.playbackEndSeconds ?? current.durationSeconds
     const versionChanged = player.audioVersion !== current.audioVersion
     const target = !versionChanged && player.position >= start && player.position < end ? player.position : start
     if (versionChanged) player.setAudioVersion(current.audioVersion)
     engine.seek(target); setPosition(target)
+  }, [engine, current?.id, current?.audioVersion, current?.audioUrl])
+
+  useEffect(() => {
+    if (current) engine.setVolume(player.masterVolume * current.volumeRatio)
+  }, [engine, player.masterVolume, current?.volumeRatio])
+
+  useEffect(() => {
+    if (!current) {
+      engine.pause()
+      if (player.playing) player.setPlaying(false)
+      return
+    }
     if (player.playing) engine.play().catch(() => player.setPlaying(false))
     else engine.pause()
-  }, [current?.id, current?.audioVersion, player.playing, player.masterVolume, current?.volumeRatio])
+  }, [engine, current?.id, current?.audioVersion, current?.audioUrl, player.playing])
 
   const playTrack = (track: Track) => player.selectTrack(track.id, advanceRecovery(player.recovery, track.id), track.audioVersion)
   const next = () => {
