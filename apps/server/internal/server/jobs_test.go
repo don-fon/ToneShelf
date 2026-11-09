@@ -24,7 +24,7 @@ func TestRecoveryRequeuesFullFileAndCleansInterruptedUpload(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg unavailable")
 	}
-	ctx := context.Background()
+	ctx := testContext()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "test.db")
 	s, err := store.Open(ctx, dbPath)
@@ -129,7 +129,7 @@ func TestRecoveryRequeuesFullFileAndCleansInterruptedUpload(t *testing.T) {
 
 func TestUploadQuotaRejectsBeforeWritingAndReleasesReservation(t *testing.T) {
 	root := t.TempDir()
-	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
+	s, err := store.Open(testContext(), filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestUploadQuotaRejectsBeforeWritingAndReleasesReservation(t *testing.T) {
 	if response.Code != http.StatusInsufficientStorage {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	jobs, _ := s.Jobs(context.Background())
+	jobs, _ := s.Jobs(testContext())
 	if len(jobs) != 1 || jobs[0].State != "failed" || jobs[0].ReservedBytes != 0 {
 		t.Fatalf("failed upload=%#v", jobs)
 	}
@@ -166,7 +166,7 @@ func TestUploadQuotaRejectsBeforeWritingAndReleasesReservation(t *testing.T) {
 }
 
 func TestSmallUploadFitsNearQuotaAndReleasesUnusedBatch(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	root := t.TempDir()
 	s, err := store.Open(ctx, filepath.Join(root, "test.db"))
 	if err != nil {
@@ -200,7 +200,7 @@ func TestTranscodeQuotaFailurePreservesOldAudioAndCleansCandidates(t *testing.T)
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg unavailable")
 	}
-	ctx := context.Background()
+	ctx := testContext()
 	root := t.TempDir()
 	s, err := store.Open(ctx, filepath.Join(root, "test.db"))
 	if err != nil {
@@ -249,7 +249,7 @@ func TestTranscodeQuotaFailurePreservesOldAudioAndCleansCandidates(t *testing.T)
 }
 
 func TestStartupCleansOrphansAndProtectsReferencedMedia(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	root := t.TempDir()
 	s, err := store.Open(ctx, filepath.Join(root, "test.db"))
 	if err != nil {
@@ -286,7 +286,7 @@ func TestStartupCleansOrphansAndProtectsReferencedMedia(t *testing.T) {
 
 func TestFailedJobCleanupRetriesWithoutReleasingQuotaEarly(t *testing.T) {
 	root := t.TempDir()
-	ctx := context.Background()
+	ctx := testContext()
 	s, err := store.Open(ctx, filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)

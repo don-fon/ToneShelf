@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -18,7 +17,7 @@ func TestOriginalProbeCorrectsBoundsAndRejectsStaleVersion(t *testing.T) {
 		{"start beyond duration", 5, 9, 0, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testContext()
 			s := openTestStore(t)
 			old, err := s.InsertTrack(ctx, NewTrack{ID: "aac", Title: "kept", OriginalPath: "source.aac", PlayablePath: "copy.mp3", OriginalContentType: "audio/aac", DurationSeconds: 10})
 			if err != nil {
@@ -58,7 +57,7 @@ func TestOriginalProbeCorrectsBoundsAndRejectsStaleVersion(t *testing.T) {
 func floatPointer(value float64) *float64 { return &value }
 
 func TestDurationMigrationSchedulesKnownLegacyAAC(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	if err := goose.DownTo(s.db, ".", 5); err != nil {
 		t.Fatal(err)

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,7 +9,7 @@ import (
 )
 
 func TestLyricsDisplayMigrationAndPersistence(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	path := filepath.Join(t.TempDir(), "lyrics.db")
 	s, err := Open(ctx, path)
 	if err != nil {
@@ -84,7 +83,7 @@ func TestLyricsDisplayMigrationAndPersistence(t *testing.T) {
 }
 
 func TestInvalidLyricsDisplayLeavesTrackUnchanged(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	old, err := s.InsertTrack(ctx, NewTrack{ID: "track", Title: "kept", DurationSeconds: 10})
 	if err != nil {
@@ -102,7 +101,7 @@ func TestInvalidLyricsDisplayLeavesTrackUnchanged(t *testing.T) {
 }
 
 func TestRemoveLyricsInferenceMigrationPreservesTextAndOtherSettings(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	s, err := Open(ctx, path)
 	if err != nil {

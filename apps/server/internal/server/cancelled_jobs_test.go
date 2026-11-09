@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,7 +15,7 @@ import (
 )
 
 func TestMaintenancePrunesLegacyCancelledJobsAndPreservesFailures(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	root := t.TempDir()
 	s, err := store.Open(ctx, filepath.Join(root, "test.db"))
 	if err != nil {

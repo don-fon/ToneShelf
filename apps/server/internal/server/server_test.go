@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -33,12 +32,12 @@ func TestLyricsSearchEndpointReturnsCandidatesWithoutSaving(t *testing.T) {
 	defer provider.Close()
 
 	root := t.TempDir()
-	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
+	s, err := store.Open(testContext(), filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	track, err := s.InsertTrack(context.Background(), store.NewTrack{ID: "track-1", Title: "ryo _ 初音未来 - ワールドイズマイン (World is Mine)_H", OriginalPath: "a", PlayablePath: "b", ContentType: "audio/mpeg", SizeBytes: 1, DurationSeconds: 255.240726})
+	track, err := s.InsertTrack(testContext(), store.NewTrack{ID: "track-1", Title: "ryo _ 初音未来 - ワールドイズマイン (World is Mine)_H", OriginalPath: "a", PlayablePath: "b", ContentType: "audio/mpeg", SizeBytes: 1, DurationSeconds: 255.240726})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +57,7 @@ func TestLyricsSearchEndpointReturnsCandidatesWithoutSaving(t *testing.T) {
 	if len(result.Candidates) != 1 || result.Candidates[0].ID != 29152005 || !result.Candidates[0].Synced {
 		t.Fatalf("unexpected result: %#v", result)
 	}
-	stored, err := s.Track(context.Background(), track.ID)
+	stored, err := s.Track(testContext(), track.ID)
 	if err != nil || stored.Lyrics != "" {
 		t.Fatalf("search must not save lyrics: %#v, %v", stored, err)
 	}
@@ -102,7 +101,7 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 		t.Fatalf("generate %s: %v: %s", filename, err, output)
 	}
 
-	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
+	s, err := store.Open(testContext(), filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,11 +150,11 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 		t.Fatalf("start status=%d body=%s", startResponse.Code, startResponse.Body.String())
 	}
 	job := finishTestJob(t, api, queued.ID, "succeeded")
-	track, err := s.Track(context.Background(), job.TrackID)
+	track, err := s.Track(testContext(), job.TrackID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	storedTrack, err := s.Track(context.Background(), track.ID)
+	storedTrack, err := s.Track(testContext(), track.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +217,7 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 		t.Fatal(err)
 	}
 	finishTestJob(t, api, queued.ID, "failed")
-	afterFailure, err := s.Track(context.Background(), track.ID)
+	afterFailure, err := s.Track(testContext(), track.ID)
 	if err != nil || afterFailure.AudioVersion != track.AudioVersion || afterFailure.PlayablePath != storedTrack.PlayablePath {
 		t.Fatalf("failed replacement changed active audio: %#v, %v", afterFailure, err)
 	}
@@ -256,7 +255,7 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 		t.Fatal(err)
 	}
 	job = finishTestJob(t, api, queued.ID, "succeeded")
-	replaced, err := s.Track(context.Background(), job.TrackID)
+	replaced, err := s.Track(testContext(), job.TrackID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +272,7 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 }
 
 func TestPlaylistTrashAndRestoreEndpoints(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	root := t.TempDir()
 	s, err := store.Open(ctx, filepath.Join(root, "test.db"))
 	if err != nil {
@@ -317,7 +316,7 @@ func TestPlaylistTrashAndRestoreEndpoints(t *testing.T) {
 }
 
 func TestMaintenanceRetainsFailedPurgeAndRetries(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	root := t.TempDir()
 	s, err := store.Open(ctx, filepath.Join(root, "test.db"))
 	if err != nil {
@@ -355,7 +354,7 @@ func TestMaintenanceRetainsFailedPurgeAndRetries(t *testing.T) {
 
 func TestPlaylistsEndpointUsesEmptyArrays(t *testing.T) {
 	root := t.TempDir()
-	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
+	s, err := store.Open(testContext(), filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,12 +382,12 @@ func TestAudioEndpointSupportsRange(t *testing.T) {
 	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
+	s, err := store.Open(testContext(), filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	_, err = s.InsertTrack(context.Background(), store.NewTrack{ID: "track-1", Title: "test", OriginalPath: path, PlayablePath: path, ContentType: "audio/mpeg", SizeBytes: 10, DurationSeconds: 1})
+	_, err = s.InsertTrack(testContext(), store.NewTrack{ID: "track-1", Title: "test", OriginalPath: path, PlayablePath: path, ContentType: "audio/mpeg", SizeBytes: 10, DurationSeconds: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,12 +409,12 @@ func TestAudioEndpointSupportsRange(t *testing.T) {
 
 func TestTrackUpdateRejectsInvalidRange(t *testing.T) {
 	root := t.TempDir()
-	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
+	s, err := store.Open(testContext(), filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	_, err = s.InsertTrack(context.Background(), store.NewTrack{ID: "track-1", Title: "test", OriginalPath: "a", PlayablePath: "b", ContentType: "audio/mpeg", SizeBytes: 1, DurationSeconds: 5})
+	_, err = s.InsertTrack(testContext(), store.NewTrack{ID: "track-1", Title: "test", OriginalPath: "a", PlayablePath: "b", ContentType: "audio/mpeg", SizeBytes: 1, DurationSeconds: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +440,7 @@ func TestTrackUpdateRejectsInvalidRange(t *testing.T) {
 			t.Fatalf("identity update status=%d body=%s", response.Code, response.Body.String())
 		}
 	}
-	stored, err := s.Track(context.Background(), "track-1")
+	stored, err := s.Track(testContext(), "track-1")
 	if err != nil || stored.Title != "新名称" || stored.Artist != "新歌手" {
 		t.Fatalf("identity=%#v err=%v", stored, err)
 	}
@@ -456,7 +455,7 @@ func TestWebClientAndSPAFallback(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(web, "index.html"), []byte("<h1>music</h1>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := store.Open(context.Background(), filepath.Join(root, "test.db"))
+	s, err := store.Open(testContext(), filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +471,7 @@ func TestWebClientAndSPAFallback(t *testing.T) {
 }
 func finishTestJob(t *testing.T, api *API, id, state string) store.UploadJob {
 	t.Helper()
-	jobs, err := api.Store.Jobs(context.Background())
+	jobs, err := api.Store.Jobs(testContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,13 +480,13 @@ func finishTestJob(t *testing.T, api *API, id, state string) store.UploadJob {
 			continue
 		}
 		if job.State == "queued" {
-			if err = api.Store.SetJobState(context.Background(), id, "queued", "processing", ""); err != nil {
+			if err = api.Store.SetJobState(testContext(), id, "queued", "processing", ""); err != nil {
 				t.Fatal(err)
 			}
-			api.processJob(context.Background(), job)
+			api.processJob(testContext(), job)
 		}
 	}
-	jobs, err = api.Store.Jobs(context.Background())
+	jobs, err = api.Store.Jobs(testContext())
 	if err != nil {
 		t.Fatal(err)
 	}

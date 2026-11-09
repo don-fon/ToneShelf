@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"time"
+
+	"music-player/server/internal/currentuser"
 )
 
 // Maintain retries replacement cleanup and permanently removes trash that has
@@ -13,7 +15,18 @@ import (
 func (a *API) Maintain(ctx context.Context) {
 	a.maintenanceMu.Lock()
 	defer a.maintenanceMu.Unlock()
+	users, err := a.Store.UserIDs(ctx)
+	if err != nil {
+		a.logMaintenance("list maintenance owners", err)
+		return
+	}
+	for _, id := range users {
+		a.maintainUser(currentuser.WithID(ctx, id))
+	}
+	a.cleanPendingFiles(ctx)
+}
 
+func (a *API) maintainUser(ctx context.Context) {
 	jobs, jobErr := a.Store.Jobs(ctx)
 	if jobErr != nil {
 		a.logMaintenance("list failed uploads", jobErr)
@@ -29,21 +42,6 @@ func (a *API) Maintain(ctx context.Context) {
 		}
 		if job.State == "failed" && (job.ReservedBytes > 0 || job.Error == "已取消") {
 			a.cleanFailedJob(ctx, job)
-		}
-	}
-	pending, err := a.Store.PendingFiles(ctx)
-	if err != nil {
-		a.logMaintenance("list pending files", err)
-		return
-	}
-	for _, file := range pending {
-		if err = os.Remove(file.Path); err == nil || errors.Is(err, os.ErrNotExist) {
-			if completeErr := a.Store.CompletePendingFile(ctx, file.Path); completeErr != nil {
-				a.logMaintenance("complete pending file", completeErr)
-			}
-		} else {
-			_ = a.Store.FailPendingFile(ctx, file.Path, err)
-			a.logMaintenance("remove old audio", err)
 		}
 	}
 
@@ -81,4 +79,23 @@ func (a *API) logMaintenance(operation string, err error) {
 	if a.Log != nil {
 		a.Log.Warn("maintenance failed", "operation", operation, "error", err)
 	}
+}
+
+func (a *API) cleanPendingFiles(ctx context.Context) {
+	pending, err := a.Store.PendingFiles(ctx)
+	if err != nil {
+		a.logMaintenance("list pending files", err)
+		return
+	}
+	for _, file := range pending {
+		if err = os.Remove(file.Path); err == nil || errors.Is(err, os.ErrNotExist) {
+			if completeErr := a.Store.CompletePendingFile(ctx, file.Path); completeErr != nil {
+				a.logMaintenance("complete pending file", completeErr)
+			}
+		} else {
+			_ = a.Store.FailPendingFile(ctx, file.Path, err)
+			a.logMaintenance("remove old audio", err)
+		}
+	}
+
 }

@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -26,7 +25,7 @@ func legacyAudioFixture(t *testing.T, format string) (*API, store.Track, string)
 			t.Skip(tool + " unavailable")
 		}
 	}
-	ctx := context.Background()
+	ctx := testContext()
 	root := t.TempDir()
 	for _, dir := range []string{"originals", "playable"} {
 		if err := os.MkdirAll(filepath.Join(root, "media", dir), 0o700); err != nil {
@@ -73,7 +72,7 @@ func legacyAudioFixture(t *testing.T, format string) (*API, store.Track, string)
 }
 
 func TestLegacyIndexRepairRecoversAndPreservesOriginalAndSettings(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	api, old, db := legacyIndexFixture(t)
 	original, err := os.ReadFile(old.OriginalPath)
 	if err != nil {
@@ -160,7 +159,7 @@ func TestLegacyIndexRepairRecoversAndPreservesOriginalAndSettings(t *testing.T) 
 }
 
 func TestIndexRepairQuotaFailureLeavesCurrentAudioUsable(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	api, old, _ := legacyIndexFixture(t)
 	used, err := api.Store.Usage(ctx)
 	if err != nil {
@@ -193,7 +192,7 @@ func TestIndexRepairQuotaFailureLeavesCurrentAudioUsable(t *testing.T) {
 }
 
 func TestIndexRepairDoesNotOverwriteConcurrentReplacement(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	api, old, _ := legacyIndexFixture(t)
 	if err := api.RecoverJobs(ctx); err != nil {
 		t.Fatal(err)

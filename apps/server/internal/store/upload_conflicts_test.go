@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -11,7 +10,7 @@ import (
 
 func prepareConflictJob(t *testing.T, s *Store, id, title string, playlistID ...string) (UploadJob, NewTrack) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testContext()
 	job := UploadJob{ID: id, FileName: id + ".flac", SourcePath: id + ".flac", OutputPath: id + ".mp3"}
 	if len(playlistID) > 0 {
 		job.PlaylistID = playlistID[0]
@@ -25,7 +24,7 @@ func prepareConflictJob(t *testing.T, s *Store, id, title string, playlistID ...
 }
 
 func TestDeletedUploadTargetCannotBeOverwritten(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	if _, err := s.InsertTrack(ctx, NewTrack{ID: "old", Title: "same", OriginalPath: "old", PlayablePath: "old", SizeBytes: 10, DurationSeconds: 10}); err != nil {
 		t.Fatal(err)
@@ -62,7 +61,7 @@ func TestDeletedUploadTargetCannotBeOverwritten(t *testing.T) {
 
 func TestConcurrentSameTitleUploadsRequireConfirmation(t *testing.T) {
 	s := openTestStore(t)
-	ctx := context.Background()
+	ctx := testContext()
 	first, a := prepareConflictJob(t, s, "a", " Song ")
 	second, b := prepareConflictJob(t, s, "b", "song")
 	results := make(chan error, 2)
@@ -96,7 +95,7 @@ func TestConcurrentSameTitleUploadsRequireConfirmation(t *testing.T) {
 }
 
 func TestUploadConflictRestartAndConfirmation(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	path := filepath.Join(t.TempDir(), "test.db")
 	s, err := Open(ctx, path)
 	if err != nil {

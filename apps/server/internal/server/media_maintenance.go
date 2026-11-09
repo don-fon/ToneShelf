@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"music-player/server/internal/currentuser"
 	"music-player/server/internal/store"
 )
 
@@ -12,6 +13,17 @@ func (a *API) ScheduleMediaMaintenance(ctx context.Context) {
 	if a.Media == nil {
 		return
 	}
+	users, err := a.Store.UserIDs(ctx)
+	if err != nil {
+		a.logMaintenance("list media owners", err)
+		return
+	}
+	for _, id := range users {
+		a.scheduleUserMediaMaintenance(currentuser.WithID(ctx, id))
+	}
+}
+
+func (a *API) scheduleUserMediaMaintenance(ctx context.Context) {
 	tracks, err := a.Store.MediaMaintenanceTracks(ctx)
 	if err != nil {
 		a.logMaintenance("list media maintenance", err)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"music-player/server/internal/currentuser"
 	"music-player/server/internal/store"
 )
 
@@ -24,22 +25,15 @@ func (a *API) RunJobs(ctx context.Context) {
 	defer ticker.Stop()
 	defer workers.Wait()
 	for {
-		jobs, err := a.Store.Jobs(ctx)
+		users, err := a.Store.UserIDs(ctx)
 		if err != nil && ctx.Err() == nil {
-			a.logMaintenance("scan upload jobs", err)
+			a.logMaintenance("list job owners", err)
 		}
-		for _, job := range jobs {
+		for _, id := range users {
 			if ctx.Err() != nil {
 				return
 			}
-			if job.State != "queued" || job.RequiresConfirmation || job.Kind == "preflight" {
-				continue
-			}
-			if err = a.Store.SetJobState(ctx, job.ID, "queued", "processing", ""); err != nil {
-				continue
-			}
-			workers.Add(1)
-			go func(job store.UploadJob) { defer workers.Done(); a.processJob(ctx, job) }(job)
+			a.scanUserJobs(currentuser.WithID(ctx, id), &workers)
 		}
 		select {
 		case <-ctx.Done():
@@ -49,7 +43,47 @@ func (a *API) RunJobs(ctx context.Context) {
 	}
 }
 
+func (a *API) scanUserJobs(ctx context.Context, workers *sync.WaitGroup) {
+	jobs, err := a.Store.Jobs(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			a.logMaintenance("scan upload jobs", err)
+		}
+		return
+	}
+	for _, job := range jobs {
+		if ctx.Err() != nil {
+			return
+		}
+		if job.State != "queued" || job.RequiresConfirmation || job.Kind == "preflight" {
+			continue
+		}
+		if err = a.Store.SetJobState(ctx, job.ID, "queued", "processing", ""); err != nil {
+			continue
+		}
+		workers.Add(1)
+		go func(job store.UploadJob) { defer workers.Done(); a.processJob(ctx, job) }(job)
+	}
+}
+
 func (a *API) RecoverJobs(ctx context.Context) error {
+	users, err := a.Store.UserIDs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range users {
+		if err = a.recoverUserJobs(currentuser.WithID(ctx, id)); err != nil {
+			return err
+		}
+	}
+	if err = a.reconcileCandidates(ctx); err != nil {
+		return err
+	}
+	a.ScheduleMediaMaintenance(ctx)
+	return nil
+}
+
+func (a *API) recoverUserJobs(ctx context.Context) error {
 	jobs, err := a.Store.Jobs(ctx)
 	if err != nil {
 		return err
@@ -121,10 +155,6 @@ func (a *API) RecoverJobs(ctx context.Context) error {
 			a.cleanFailedJob(ctx, job)
 		}
 	}
-	if err = a.reconcileCandidates(ctx); err != nil {
-		return err
-	}
-	a.ScheduleMediaMaintenance(ctx)
 	return nil
 }
 
@@ -426,7 +456,7 @@ func (a *API) receiveJob(w http.ResponseWriter, r *http.Request, target string, 
 	}
 	if err != nil {
 		// A disconnected request cannot be used to persist failure/cleanup.
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		defer cancel()
 		if stateErr := a.Store.SetJobState(cleanupCtx, id, "receiving", "failed", err.Error()); stateErr == nil {
 			a.cleanFailedJob(cleanupCtx, job)

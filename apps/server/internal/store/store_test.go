@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -12,7 +11,7 @@ import (
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := Open(testContext(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +20,7 @@ func openTestStore(t *testing.T) *Store {
 }
 
 func TestDisplayMigrationBackfillsLegacyTracks(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	s, err := Open(ctx, path)
 	if err != nil {
@@ -52,7 +51,7 @@ func TestDisplayMigrationBackfillsLegacyTracks(t *testing.T) {
 }
 
 func TestEditableIdentityPersistsAcrossReplacementAndRestart(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	path := filepath.Join(t.TempDir(), "identity.db")
 	s, err := Open(ctx, path)
 	if err != nil {
@@ -95,7 +94,7 @@ func TestEditableIdentityPersistsAcrossReplacementAndRestart(t *testing.T) {
 }
 
 func TestPlaylistLifecycleAndDefaultRemovalConfirmation(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	for _, id := range []string{"track-1", "track-2"} {
 		if _, err := s.InsertTrack(ctx, NewTrack{ID: id, Title: id, OriginalPath: id + ".source", PlayablePath: id + ".mp3", ContentType: "audio/mpeg", SizeBytes: 1, DurationSeconds: 10}); err != nil {
@@ -146,7 +145,7 @@ func TestPlaylistLifecycleAndDefaultRemovalConfirmation(t *testing.T) {
 }
 
 func TestTrashRestoreAndPurgeBoundary(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	if _, err := s.InsertTrack(ctx, NewTrack{ID: "track-1", Title: "test", OriginalPath: "a", PlayablePath: "b", ContentType: "audio/mpeg", SizeBytes: 2, DurationSeconds: 10}); err != nil {
 		t.Fatal(err)
@@ -178,7 +177,7 @@ func TestTrashRestoreAndPurgeBoundary(t *testing.T) {
 }
 
 func TestReplaceTrackPreservesSettingsAndQueuesOldFiles(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	track, err := s.InsertTrack(ctx, NewTrack{ID: "track-1", Title: "old", OriginalPath: "old.src", PlayablePath: "old.mp3", ContentType: "audio/mpeg", SizeBytes: 12, DurationSeconds: 10})
 	if err != nil {
@@ -206,7 +205,7 @@ func TestReplaceTrackPreservesSettingsAndQueuesOldFiles(t *testing.T) {
 }
 
 func TestDefaultPlaylistAndTrackSettings(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	playlists, err := s.Playlists(ctx)
 	if err != nil {
@@ -244,7 +243,7 @@ func TestDefaultPlaylistAndTrackSettings(t *testing.T) {
 }
 
 func TestCreatePlaylistAndPreventDuplicateTrack(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	_, err := s.InsertTrack(ctx, NewTrack{ID: "track-1", Title: "测试音乐", OriginalPath: "a", PlayablePath: "b", ContentType: "audio/mpeg", SizeBytes: 1, DurationSeconds: 1})
 	if err != nil {

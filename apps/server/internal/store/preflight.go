@@ -6,10 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"music-player/server/internal/currentuser"
 )
 
 func duplicateTitle(ctx context.Context, tx *sql.Tx, title string) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,title FROM tracks WHERE owner_user_id=? AND deleted_at IS NULL ORDER BY created_at,id`, DefaultUserID)
+	if err := currentuser.Require(ctx); err != nil {
+		return "", err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id,title FROM tracks WHERE owner_user_id=? AND deleted_at IS NULL ORDER BY created_at,id`, currentuser.ID(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -27,6 +32,9 @@ func duplicateTitle(ctx context.Context, tx *sql.Tx, title string) (string, erro
 }
 
 func (s *Store) PrepareUpload(ctx context.Context, id, title string, size int64) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -40,7 +48,7 @@ func (s *Store) PrepareUpload(ctx context.Context, id, title string, size int64)
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET state='queued',target_track_id=?,pending_candidate=?,reserved_bytes=?,updated_at=? WHERE id=? AND owner_user_id=? AND kind='preflight' AND state='receiving' AND reserved_bytes>=?`, target, string(candidate), size, nowText(), id, DefaultUserID, size)
+	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET state='queued',target_track_id=?,pending_candidate=?,reserved_bytes=?,updated_at=? WHERE id=? AND owner_user_id=? AND kind='preflight' AND state='receiving' AND reserved_bytes>=?`, target, string(candidate), size, nowText(), id, currentuser.ID(ctx), size)
 	if err = requireOne(result, err); err != nil {
 		return err
 	}
@@ -48,13 +56,16 @@ func (s *Store) PrepareUpload(ctx context.Context, id, title string, size int64)
 }
 
 func (s *Store) StartPreparedUpload(ctx context.Context, id, key string) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	var target, pending string
-	if err = tx.QueryRowContext(ctx, `SELECT target_track_id,pending_candidate FROM upload_jobs WHERE id=? AND owner_user_id=? AND kind='preflight' AND state='queued'`, id, DefaultUserID).Scan(&target, &pending); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT target_track_id,pending_candidate FROM upload_jobs WHERE id=? AND owner_user_id=? AND kind='preflight' AND state='queued'`, id, currentuser.ID(ctx)).Scan(&target, &pending); err != nil {
 		return err
 	}
 	var candidate NewTrack
@@ -68,7 +79,7 @@ func (s *Store) StartPreparedUpload(ctx context.Context, id, key string) error {
 	if current != target {
 		return errors.New("同名歌曲已变化，请取消后重新选择文件")
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET kind='upload',pending_candidate='',request_key=?,updated_at=? WHERE id=? AND kind='preflight' AND state='queued'`, key, nowText(), id)
+	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET kind='upload',pending_candidate='',request_key=?,updated_at=? WHERE id=? AND owner_user_id=? AND kind='preflight' AND state='queued'`, key, nowText(), id, currentuser.ID(ctx))
 	if err = requireOne(result, err); err != nil {
 		return err
 	}

@@ -26,7 +26,7 @@ func TestUploadPreflightBeforeVisibleTasks(t *testing.T) {
 	}
 	for _, mode := range []string{"cancel", "overwrite", "new", "restart", "renamed", "filename", "invalid"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testContext()
 			root := t.TempDir()
 			db := filepath.Join(root, "test.db")
 			s, err := store.Open(ctx, db)
@@ -216,7 +216,7 @@ func TestUploadPreflightBeforeVisibleTasks(t *testing.T) {
 }
 
 func TestPreflightRejectsMissingPlaylistBeforeReceiving(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)

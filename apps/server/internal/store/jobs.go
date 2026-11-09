@@ -2,16 +2,22 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"music-player/server/internal/currentuser"
 )
 
 var ErrQuotaExceeded = errors.New("存储空间不足")
 var ErrUploadConflict = errors.New("存在同名歌曲，需要确认覆盖")
 
 func (s *Store) DeleteCancelledJob(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM upload_jobs WHERE id=? AND owner_user_id=? AND state='failed' AND error='已取消' AND reserved_bytes=0`, id, DefaultUserID)
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM upload_jobs WHERE id=? AND owner_user_id=? AND state='failed' AND error='已取消' AND reserved_bytes=0`, id, currentuser.ID(ctx))
 	return err
 }
 
@@ -39,15 +45,35 @@ type UploadJob struct {
 const usageSQL = `(SELECT COALESCE(SUM(size_bytes),0) FROM tracks)+(SELECT COALESCE(SUM(size_bytes),0) FROM pending_file_deletions)+(SELECT COALESCE(SUM(reserved_bytes),0) FROM upload_jobs)`
 
 func (s *Store) CreateJob(ctx context.Context, job UploadJob) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
+	if job.TargetTrackID != "" {
+		if _, err := s.Track(ctx, job.TargetTrackID); err != nil {
+			return err
+		}
+	}
+	if job.PlaylistID != "" {
+		exists, err := s.PlaylistExists(ctx, job.PlaylistID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return sql.ErrNoRows
+		}
+	}
 	if job.Kind == "" {
 		job.Kind = "upload"
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO upload_jobs(id,owner_user_id,file_name,request_key,target_track_id,source_path,output_path,state,created_at,updated_at,kind,playlist_id) VALUES(?,?,?,?,?,?,?,'receiving',?,?,?,?)`, job.ID, DefaultUserID, job.FileName, job.RequestKey, job.TargetTrackID, job.SourcePath, job.OutputPath, nowText(), nowText(), job.Kind, job.PlaylistID)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO upload_jobs(id,owner_user_id,file_name,request_key,target_track_id,source_path,output_path,state,created_at,updated_at,kind,playlist_id) VALUES(?,?,?,?,?,?,?,'receiving',?,?,?,?)`, job.ID, currentuser.ID(ctx), job.FileName, job.RequestKey, job.TargetTrackID, job.SourcePath, job.OutputPath, nowText(), nowText(), job.Kind, job.PlaylistID)
 	return err
 }
 
 func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,kind,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at,pending_candidate,playlist_id FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, DefaultUserID)
+	if err := currentuser.Require(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,kind,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at,pending_candidate,playlist_id FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, currentuser.ID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -73,10 +99,13 @@ func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
 }
 
 func (s *Store) ReserveJob(ctx context.Context, id string, bytes, limit int64) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	if bytes < 0 {
 		return errors.New("invalid reservation")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE upload_jobs SET reserved_bytes=reserved_bytes+?,updated_at=? WHERE id=? AND owner_user_id=? AND state IN ('receiving','queued','processing') AND (`+usageSQL+`)<=?-?`, bytes, nowText(), id, DefaultUserID, limit, bytes)
+	result, err := s.db.ExecContext(ctx, `UPDATE upload_jobs SET reserved_bytes=reserved_bytes+?,updated_at=? WHERE id=? AND owner_user_id=? AND state IN ('receiving','queued','processing') AND (`+usageSQL+`)<=?-?`, bytes, nowText(), id, currentuser.ID(ctx), limit, bytes)
 	if err != nil {
 		return err
 	}
@@ -94,6 +123,9 @@ func (s *Store) ReserveJob(ctx context.Context, id string, bytes, limit int64) e
 // still available, provided it covers the next write; never reject a small
 // valid file merely because a full preferred batch no longer fits.
 func (s *Store) ReserveUploadBatch(ctx context.Context, id string, minimum, preferred, limit int64) (int64, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return 0, err
+	}
 	if minimum <= 0 || preferred < minimum {
 		return 0, errors.New("invalid reservation")
 	}
@@ -111,7 +143,7 @@ func (s *Store) ReserveUploadBatch(ctx context.Context, id string, minimum, pref
 		return 0, ErrQuotaExceeded
 	}
 	grant := min(preferred, available)
-	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET reserved_bytes=reserved_bytes+?,updated_at=? WHERE id=? AND owner_user_id=? AND state='receiving'`, grant, nowText(), id, DefaultUserID)
+	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET reserved_bytes=reserved_bytes+?,updated_at=? WHERE id=? AND owner_user_id=? AND state='receiving'`, grant, nowText(), id, currentuser.ID(ctx))
 	if err = requireOne(result, err); err != nil {
 		return 0, err
 	}
@@ -124,22 +156,31 @@ func (s *Store) ReserveUploadBatch(ctx context.Context, id string, minimum, pref
 // File reception is durable before this transition. Release unused headroom
 // and expose the job to workers in the same transaction.
 func (s *Store) QueueUpload(ctx context.Context, id string, size int64) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	if size < 0 {
 		return errors.New("invalid upload size")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE upload_jobs SET state='queued',reserved_bytes=?,updated_at=? WHERE id=? AND owner_user_id=? AND state='receiving' AND reserved_bytes>=?`, size, nowText(), id, DefaultUserID, size)
+	result, err := s.db.ExecContext(ctx, `UPDATE upload_jobs SET state='queued',reserved_bytes=?,updated_at=? WHERE id=? AND owner_user_id=? AND state='receiving' AND reserved_bytes>=?`, size, nowText(), id, currentuser.ID(ctx), size)
 	return requireOne(result, err)
 }
 
 func (s *Store) SetJobState(ctx context.Context, id, from, to, failure string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE upload_jobs SET state=?,error=?,updated_at=? WHERE id=? AND owner_user_id=? AND state=?`, to, failure, nowText(), id, DefaultUserID, from)
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE upload_jobs SET state=?,error=?,updated_at=? WHERE id=? AND owner_user_id=? AND state=?`, to, failure, nowText(), id, currentuser.ID(ctx), from)
 	return requireOne(result, err)
 }
 
 // Only call after physically removing the corresponding candidate bytes.
 func (s *Store) SetJobReservation(ctx context.Context, id string, bytes int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE upload_jobs SET reserved_bytes=?,updated_at=? WHERE id=? AND owner_user_id=?`, bytes, nowText(), id, DefaultUserID)
-	return err
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE upload_jobs SET reserved_bytes=?,updated_at=? WHERE id=? AND owner_user_id=?`, bytes, nowText(), id, currentuser.ID(ctx))
+	return requireOne(result, err)
 }
 
 func (s *Store) ReservedBytes(ctx context.Context) (int64, error) {
@@ -178,10 +219,16 @@ func (s *Store) QueueOrphan(ctx context.Context, path string, bytes int64) error
 // Activating files and exchanging reservations for committed usage must be one
 // transaction. A crash before commit leaves a recoverable processing job.
 func (s *Store) CompleteJob(ctx context.Context, job UploadJob, track NewTrack, oldFiles []PendingFile) (Track, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return Track{}, err
+	}
 	return s.completeJob(ctx, job, track, oldFiles, "processing")
 }
 
 func (s *Store) ConfirmUpload(ctx context.Context, job UploadJob, oldFiles []PendingFile) (Track, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return Track{}, err
+	}
 	if !job.RequiresConfirmation || job.Candidate == nil {
 		return Track{}, errors.New("任务无需确认")
 	}
@@ -189,15 +236,22 @@ func (s *Store) ConfirmUpload(ctx context.Context, job UploadJob, oldFiles []Pen
 }
 
 func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, oldFiles []PendingFile, expected string) (Track, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return Track{}, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Track{}, err
 	}
 	defer tx.Rollback()
+	defaultPlaylistID, playlistErr := defaultPlaylistTx(ctx, tx)
+	if playlistErr != nil {
+		return Track{}, playlistErr
+	}
 	var state string
 	var playlistID string
 	var reserved int64
-	if err = tx.QueryRowContext(ctx, `SELECT state,reserved_bytes,playlist_id FROM upload_jobs WHERE id=? AND owner_user_id=?`, job.ID, DefaultUserID).Scan(&state, &reserved, &playlistID); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT state,reserved_bytes,playlist_id FROM upload_jobs WHERE id=? AND owner_user_id=?`, job.ID, currentuser.ID(ctx)).Scan(&state, &reserved, &playlistID); err != nil {
 		return Track{}, err
 	}
 	if state != expected || track.SizeBytes > reserved {
@@ -205,13 +259,13 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 	}
 	if expected == "queued" {
 		var pending, targetTitle string
-		if err = tx.QueryRowContext(ctx, `SELECT pending_candidate FROM upload_jobs WHERE id=?`, job.ID).Scan(&pending); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT pending_candidate FROM upload_jobs WHERE id=? AND owner_user_id=?`, job.ID, currentuser.ID(ctx)).Scan(&pending); err != nil {
 			return Track{}, err
 		}
 		if pending == "" {
 			return Track{}, errors.New("任务无需确认")
 		}
-		if err = tx.QueryRowContext(ctx, `SELECT title FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, job.TargetTrackID, DefaultUserID).Scan(&targetTitle); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT title FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, job.TargetTrackID, currentuser.ID(ctx)).Scan(&targetTitle); err != nil {
 			return Track{}, err
 		}
 		if !strings.EqualFold(strings.TrimSpace(targetTitle), strings.TrimSpace(track.Title)) {
@@ -229,7 +283,7 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 			if marshalErr != nil {
 				return Track{}, marshalErr
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE upload_jobs SET state='queued',target_track_id=?,pending_candidate=?,reserved_bytes=?,updated_at=? WHERE id=?`, duplicate, string(candidate), track.SizeBytes, nowText(), job.ID)
+			_, err = tx.ExecContext(ctx, `UPDATE upload_jobs SET state='queued',target_track_id=?,pending_candidate=?,reserved_bytes=?,updated_at=? WHERE id=? AND owner_user_id=?`, duplicate, string(candidate), track.SizeBytes, nowText(), job.ID, currentuser.ID(ctx))
 			if err != nil {
 				return Track{}, err
 			}
@@ -239,9 +293,9 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 			return Track{}, ErrUploadConflict
 		}
 		err = insertTrackTx(ctx, tx, track)
-		if err == nil && playlistID != "" && playlistID != DefaultPlaylistID {
+		if err == nil && playlistID != "" && playlistID != defaultPlaylistID {
 			var exists bool
-			err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_user_id=?)`, playlistID, DefaultUserID).Scan(&exists)
+			err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_user_id=?)`, playlistID, currentuser.ID(ctx)).Scan(&exists)
 			if err == nil && exists {
 				err = addTrackTx(ctx, tx, playlistID, track.ID, job.ID+"-upload-playlist")
 			}
@@ -253,7 +307,7 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 	if err != nil {
 		return Track{}, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET state='succeeded',track_id=?,reserved_bytes=0,pending_candidate='',error='',updated_at=? WHERE id=? AND state=?`, id, nowText(), job.ID, expected)
+	result, err := tx.ExecContext(ctx, `UPDATE upload_jobs SET state='succeeded',track_id=?,reserved_bytes=0,pending_candidate='',error='',updated_at=? WHERE id=? AND owner_user_id=? AND state=?`, id, nowText(), job.ID, currentuser.ID(ctx), expected)
 	if err = requireOne(result, err); err != nil {
 		return Track{}, err
 	}

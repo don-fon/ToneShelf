@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestLyricsDisplayAPIValidatesAndReturnsSavedChoice(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)

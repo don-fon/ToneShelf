@@ -26,7 +26,7 @@ func TestDuplicateUploadDecisionAndRecovery(t *testing.T) {
 	}
 	for _, overwrite := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cancel", true: "overwrite"}[overwrite], func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testContext()
 			root := t.TempDir()
 			db := filepath.Join(root, "test.db")
 			s, err := store.Open(ctx, db)

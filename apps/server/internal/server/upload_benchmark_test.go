@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -17,7 +16,7 @@ import (
 // file sync. No worker runs: this measures reception, excluding transcoding.
 func BenchmarkUpload77MiB(b *testing.B) {
 	root := b.TempDir()
-	s, err := store.Open(context.Background(), filepath.Join(root, "benchmark.db"))
+	s, err := store.Open(testContext(), filepath.Join(root, "benchmark.db"))
 	if err != nil {
 		b.Fatal(err)
 	}

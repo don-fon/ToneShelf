@@ -11,6 +11,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
+	"music-player/server/internal/currentuser"
 )
 
 const (
@@ -113,31 +114,25 @@ func (s *Store) migrate() error {
 }
 
 func (s *Store) seed(ctx context.Context) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO users(id,display_name,created_at) VALUES(?,?,?)`, DefaultUserID, "默认用户", now); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO playlists(id,owner_user_id,name,is_default,created_at,updated_at) VALUES(?,?,?,?,?,?)`, DefaultPlaylistID, DefaultUserID, "默认歌单", 1, now, now); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.EnsureUser(ctx, DefaultUserID, "默认用户", DefaultPlaylistID)
 }
 
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) PlaylistExists(ctx context.Context, id string) (bool, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return false, err
+	}
 	var exists bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_user_id=?)`, id, DefaultUserID).Scan(&exists)
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_user_id=?)`, id, currentuser.ID(ctx)).Scan(&exists)
 	return exists, err
 }
 
 func (s *Store) Playlists(ctx context.Context) ([]Playlist, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,is_default FROM playlists WHERE owner_user_id=? ORDER BY is_default DESC, created_at`, DefaultUserID)
+	if err := currentuser.Require(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,is_default FROM playlists WHERE owner_user_id=? ORDER BY is_default DESC, created_at`, currentuser.ID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -168,9 +163,12 @@ func (s *Store) Playlists(ctx context.Context) ([]Playlist, error) {
 }
 
 func (s *Store) tracksForPlaylist(ctx context.Context, playlistID string) ([]Track, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT t.id,t.title,t.artist,t.album,t.content_type,t.size_bytes,t.duration_seconds,t.base_random_weight,t.playback_start_seconds,t.playback_end_seconds,t.volume_ratio,t.lyrics,t.lyrics_layout,t.lyrics_primary_line,t.original_path,t.playable_path,t.audio_version,t.original_content_type,t.playback_index_version,t.duration_probe_version,t.file_name,t.created_at
-		FROM playlist_items pi JOIN tracks t ON t.id=pi.track_id
-		WHERE pi.playlist_id=? AND t.deleted_at IS NULL ORDER BY pi.position`, playlistID)
+		FROM playlist_items pi JOIN tracks t ON t.id=pi.track_id JOIN playlists p ON p.id=pi.playlist_id
+		WHERE pi.playlist_id=? AND t.deleted_at IS NULL AND t.owner_user_id=? AND p.owner_user_id=? ORDER BY pi.position`, playlistID, currentuser.ID(ctx), currentuser.ID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -195,9 +193,12 @@ func (s *Store) tracksForPlaylist(ctx context.Context, playlistID string) ([]Tra
 }
 
 func (s *Store) Track(ctx context.Context, id string) (Track, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return Track{}, err
+	}
 	var t Track
 	var end sql.NullFloat64
-	err := s.db.QueryRowContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, id, DefaultUserID).Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.ContentType, &t.SizeBytes, &t.DurationSeconds, &t.BaseRandomWeight, &t.PlaybackStartSeconds, &end, &t.VolumeRatio, &t.Lyrics, &t.LyricsLayout, &t.LyricsPrimaryLine, &t.OriginalPath, &t.PlayablePath, &t.AudioVersion, &t.OriginalContentType, &t.PlaybackIndexVersion, &t.DurationProbeVersion, &t.FileName, &t.UploadedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, id, currentuser.ID(ctx)).Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.ContentType, &t.SizeBytes, &t.DurationSeconds, &t.BaseRandomWeight, &t.PlaybackStartSeconds, &end, &t.VolumeRatio, &t.Lyrics, &t.LyricsLayout, &t.LyricsPrimaryLine, &t.OriginalPath, &t.PlayablePath, &t.AudioVersion, &t.OriginalContentType, &t.PlaybackIndexVersion, &t.DurationProbeVersion, &t.FileName, &t.UploadedAt)
 	if end.Valid {
 		t.PlaybackEndSeconds = &end.Float64
 	}
@@ -209,6 +210,9 @@ func (s *Store) Track(ctx context.Context, id string) (Track, error) {
 }
 
 func (s *Store) InsertTrack(ctx context.Context, n NewTrack) (Track, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return Track{}, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Track{}, err
@@ -224,23 +228,32 @@ func (s *Store) InsertTrack(ctx context.Context, n NewTrack) (Track, error) {
 }
 
 func insertTrackTx(ctx context.Context, tx *sql.Tx, n NewTrack) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	now := nowText()
-	var err error
-	_, err = tx.ExecContext(ctx, `INSERT INTO tracks(id,owner_user_id,title,artist,album,original_path,playable_path,content_type,size_bytes,duration_seconds,file_name,created_at,updated_at,original_content_type,playback_index_version,duration_probe_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, n.ID, DefaultUserID, n.Title, n.Artist, n.Album, n.OriginalPath, n.PlayablePath, n.ContentType, n.SizeBytes, n.DurationSeconds, n.FileName, now, now, n.OriginalContentType, n.PlaybackIndexVersion, n.DurationProbeVersion)
+	defaultPlaylistID, err := defaultPlaylistTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO tracks(id,owner_user_id,title,artist,album,original_path,playable_path,content_type,size_bytes,duration_seconds,file_name,created_at,updated_at,original_content_type,playback_index_version,duration_probe_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, n.ID, currentuser.ID(ctx), n.Title, n.Artist, n.Album, n.OriginalPath, n.PlayablePath, n.ContentType, n.SizeBytes, n.DurationSeconds, n.FileName, now, now, n.OriginalContentType, n.PlaybackIndexVersion, n.DurationProbeVersion)
 	if err != nil {
 		return err
 	}
 	var pos int
-	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),-1)+1 FROM playlist_items WHERE playlist_id=?`, DefaultPlaylistID).Scan(&pos); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),-1)+1 FROM playlist_items WHERE playlist_id=?`, defaultPlaylistID).Scan(&pos); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO playlist_items(id,playlist_id,track_id,position,created_at) VALUES(?,?,?,?,?)`, n.ID+"-default", DefaultPlaylistID, n.ID, pos, now); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO playlist_items(id,playlist_id,track_id,position,created_at) VALUES(?,?,?,?,?)`, n.ID+"-default", defaultPlaylistID, n.ID, pos, now); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (s *Store) UpdateTrack(ctx context.Context, id string, weight, start float64, end *float64, volume float64, lyrics string, optional ...*string) (Track, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return Track{}, err
+	}
 	if weight <= 0 || start < 0 || volume < 0 || volume > 1 {
 		return Track{}, errors.New("invalid track settings")
 	}
@@ -294,7 +307,7 @@ func (s *Store) UpdateTrack(ctx context.Context, id string, weight, start float6
 	} else if start >= t.DurationSeconds {
 		return Track{}, errors.New("invalid playback range")
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE tracks SET title=COALESCE(?,title),artist=COALESCE(?,artist),custom_title=CASE WHEN ? IS NULL THEN custom_title ELSE 1 END,custom_artist=CASE WHEN ? IS NULL THEN custom_artist ELSE 1 END,base_random_weight=?,playback_start_seconds=?,playback_end_seconds=?,volume_ratio=?,lyrics=?,lyrics_layout=COALESCE(?,lyrics_layout),lyrics_primary_line=COALESCE(?,lyrics_primary_line),updated_at=? WHERE id=? AND owner_user_id=?`, title, artist, title, artist, weight, start, endValue, volume, ensureLyricsOffset(lyrics), layout, primary, time.Now().UTC().Format(time.RFC3339Nano), id, DefaultUserID)
+	_, err = s.db.ExecContext(ctx, `UPDATE tracks SET title=COALESCE(?,title),artist=COALESCE(?,artist),custom_title=CASE WHEN ? IS NULL THEN custom_title ELSE 1 END,custom_artist=CASE WHEN ? IS NULL THEN custom_artist ELSE 1 END,base_random_weight=?,playback_start_seconds=?,playback_end_seconds=?,volume_ratio=?,lyrics=?,lyrics_layout=COALESCE(?,lyrics_layout),lyrics_primary_line=COALESCE(?,lyrics_primary_line),updated_at=? WHERE id=? AND owner_user_id=?`, title, artist, title, artist, weight, start, endValue, volume, ensureLyricsOffset(lyrics), layout, primary, time.Now().UTC().Format(time.RFC3339Nano), id, currentuser.ID(ctx))
 	if err != nil {
 		return Track{}, err
 	}
@@ -302,20 +315,26 @@ func (s *Store) UpdateTrack(ctx context.Context, id string, weight, start float6
 }
 
 func (s *Store) CreatePlaylist(ctx context.Context, id, name string) (Playlist, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return Playlist{}, err
+	}
 	if name == "" {
 		return Playlist{}, errors.New("name is required")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO playlists(id,owner_user_id,name,is_default,created_at,updated_at) VALUES(?,?,?,?,?,?)`, id, DefaultUserID, name, 0, now, now)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO playlists(id,owner_user_id,name,is_default,created_at,updated_at) VALUES(?,?,?,?,?,?)`, id, currentuser.ID(ctx), name, 0, now, now)
 	return Playlist{ID: id, Name: name, Tracks: []Track{}}, err
 }
 
 func (s *Store) AddTrack(ctx context.Context, playlistID, trackID, itemID string) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	var pos int
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),-1)+1 FROM playlist_items WHERE playlist_id=?`, playlistID).Scan(&pos); err != nil {
 		return err
 	}
-	res, err := s.db.ExecContext(ctx, `INSERT INTO playlist_items(id,playlist_id,track_id,position,created_at) SELECT ?,p.id,t.id,?,? FROM playlists p,tracks t WHERE p.id=? AND p.owner_user_id=? AND t.id=? AND t.owner_user_id=? AND t.deleted_at IS NULL`, itemID, pos, time.Now().UTC().Format(time.RFC3339Nano), playlistID, DefaultUserID, trackID, DefaultUserID)
+	res, err := s.db.ExecContext(ctx, `INSERT INTO playlist_items(id,playlist_id,track_id,position,created_at) SELECT ?,p.id,t.id,?,? FROM playlists p,tracks t WHERE p.id=? AND p.owner_user_id=? AND t.id=? AND t.owner_user_id=? AND t.deleted_at IS NULL`, itemID, pos, time.Now().UTC().Format(time.RFC3339Nano), playlistID, currentuser.ID(ctx), trackID, currentuser.ID(ctx))
 	if err != nil {
 		return err
 	}
@@ -327,21 +346,31 @@ func (s *Store) AddTrack(ctx context.Context, playlistID, trackID, itemID string
 }
 
 func (s *Store) RenamePlaylist(ctx context.Context, id, name string) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errors.New("name is required")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE playlists SET name=?,updated_at=? WHERE id=? AND owner_user_id=? AND is_default=0`, name, nowText(), id, DefaultUserID)
+	result, err := s.db.ExecContext(ctx, `UPDATE playlists SET name=?,updated_at=? WHERE id=? AND owner_user_id=? AND is_default=0`, name, nowText(), id, currentuser.ID(ctx))
 	return requireOne(result, err)
 }
 
 func (s *Store) DeletePlaylist(ctx context.Context, id string) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT track_id FROM playlist_items WHERE playlist_id=?`, id)
+	defaultPlaylistID, playlistErr := defaultPlaylistTx(ctx, tx)
+	if playlistErr != nil {
+		return playlistErr
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT pi.track_id FROM playlist_items pi JOIN tracks t ON t.id=pi.track_id WHERE pi.playlist_id=? AND t.owner_user_id=? AND t.deleted_at IS NULL`, id, currentuser.ID(ctx))
 	if err != nil {
 		return err
 	}
@@ -357,17 +386,17 @@ func (s *Store) DeletePlaylist(ctx context.Context, id string) error {
 	if err = rows.Close(); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM playlists WHERE id=? AND owner_user_id=? AND is_default=0`, id, DefaultUserID)
+	result, err := tx.ExecContext(ctx, `DELETE FROM playlists WHERE id=? AND owner_user_id=? AND is_default=0`, id, currentuser.ID(ctx))
 	if err = requireOne(result, err); err != nil {
 		return err
 	}
 	for _, trackID := range trackIDs {
 		var count int
-		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlist_items WHERE track_id=?`, trackID).Scan(&count); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlist_items pi JOIN playlists p ON p.id=pi.playlist_id WHERE pi.track_id=? AND p.owner_user_id=?`, trackID, currentuser.ID(ctx)).Scan(&count); err != nil {
 			return err
 		}
 		if count == 0 {
-			if err = addTrackTx(ctx, tx, DefaultPlaylistID, trackID, trackID+"-restored-"+time.Now().Format("150405.000000000")); err != nil {
+			if err = addTrackTx(ctx, tx, defaultPlaylistID, trackID, trackID+"-restored-"+time.Now().Format("150405.000000000")); err != nil {
 				return err
 			}
 		}
@@ -376,21 +405,28 @@ func (s *Store) DeletePlaylist(ctx context.Context, id string) error {
 }
 
 func (s *Store) RemoveTrackFromPlaylist(ctx context.Context, playlistID, trackID string, confirmDelete bool, now time.Time) (RemoveResult, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return RemoveResult{}, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return RemoveResult{}, err
 	}
 	defer tx.Rollback()
+	defaultPlaylistID, playlistErr := defaultPlaylistTx(ctx, tx)
+	if playlistErr != nil {
+		return RemoveResult{}, playlistErr
+	}
 	var isDefault bool
-	if err = tx.QueryRowContext(ctx, `SELECT is_default FROM playlists WHERE id=? AND owner_user_id=?`, playlistID, DefaultUserID).Scan(&isDefault); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT is_default FROM playlists WHERE id=? AND owner_user_id=?`, playlistID, currentuser.ID(ctx)).Scan(&isDefault); err != nil {
 		return RemoveResult{}, err
 	}
 	var memberships int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlist_items WHERE track_id=?`, trackID).Scan(&memberships); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlist_items pi JOIN playlists p ON p.id=pi.playlist_id WHERE pi.track_id=? AND p.owner_user_id=?`, trackID, currentuser.ID(ctx)).Scan(&memberships); err != nil {
 		return RemoveResult{}, err
 	}
 	var exists int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlist_items WHERE playlist_id=? AND track_id=?`, playlistID, trackID).Scan(&exists); err != nil || exists != 1 {
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlist_items pi JOIN tracks t ON t.id=pi.track_id WHERE pi.playlist_id=? AND pi.track_id=? AND t.owner_user_id=? AND t.deleted_at IS NULL`, playlistID, trackID, currentuser.ID(ctx)).Scan(&exists); err != nil || exists != 1 {
 		if err == nil {
 			err = sql.ErrNoRows
 		}
@@ -412,7 +448,7 @@ func (s *Store) RemoveTrackFromPlaylist(ctx context.Context, playlistID, trackID
 		return RemoveResult{}, err
 	}
 	if memberships == 1 {
-		if err = addTrackTx(ctx, tx, DefaultPlaylistID, trackID, trackID+"-fallback-"+time.Now().Format("150405.000000000")); err != nil {
+		if err = addTrackTx(ctx, tx, defaultPlaylistID, trackID, trackID+"-fallback-"+time.Now().Format("150405.000000000")); err != nil {
 			return RemoveResult{}, err
 		}
 	}
@@ -423,6 +459,9 @@ func (s *Store) RemoveTrackFromPlaylist(ctx context.Context, playlistID, trackID
 }
 
 func (s *Store) SoftDeleteTrack(ctx context.Context, id string, now time.Time) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -435,7 +474,10 @@ func (s *Store) SoftDeleteTrack(ctx context.Context, id string, now time.Time) e
 }
 
 func (s *Store) Trash(ctx context.Context) ([]Track, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,deleted_at,purge_eligible_at,purge_error FROM tracks WHERE owner_user_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`, DefaultUserID)
+	if err := currentuser.Require(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,deleted_at,purge_eligible_at,purge_error FROM tracks WHERE owner_user_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`, currentuser.ID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -452,21 +494,28 @@ func (s *Store) Trash(ctx context.Context) ([]Track, error) {
 }
 
 func (s *Store) RestoreTrack(ctx context.Context, id, itemID string) (Track, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return Track{}, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Track{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE tracks SET deleted_at=NULL,purge_eligible_at=NULL,purge_error='',updated_at=? WHERE id=? AND owner_user_id=? AND deleted_at IS NOT NULL`, nowText(), id, DefaultUserID)
+	defaultPlaylistID, playlistErr := defaultPlaylistTx(ctx, tx)
+	if playlistErr != nil {
+		return Track{}, playlistErr
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE tracks SET deleted_at=NULL,purge_eligible_at=NULL,purge_error='',updated_at=? WHERE id=? AND owner_user_id=? AND deleted_at IS NOT NULL`, nowText(), id, currentuser.ID(ctx))
 	if err = requireOne(result, err); err != nil {
 		return Track{}, err
 	}
 	var count int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlist_items WHERE track_id=?`, id).Scan(&count); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlist_items pi JOIN playlists p ON p.id=pi.playlist_id WHERE pi.track_id=? AND p.owner_user_id=?`, id, currentuser.ID(ctx)).Scan(&count); err != nil {
 		return Track{}, err
 	}
 	if count == 0 {
-		if err = addTrackTx(ctx, tx, DefaultPlaylistID, id, itemID); err != nil {
+		if err = addTrackTx(ctx, tx, defaultPlaylistID, id, itemID); err != nil {
 			return Track{}, err
 		}
 	}
@@ -477,6 +526,9 @@ func (s *Store) RestoreTrack(ctx context.Context, id, itemID string) (Track, err
 }
 
 func (s *Store) ReplaceTrack(ctx context.Context, id string, replacement NewTrack, oldFiles []PendingFile) (Track, error) {
+	if err := currentuser.Require(ctx); err != nil {
+		return Track{}, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Track{}, err
@@ -492,11 +544,14 @@ func (s *Store) ReplaceTrack(ctx context.Context, id string, replacement NewTrac
 }
 
 func replaceTrackTx(ctx context.Context, tx *sql.Tx, id string, replacement NewTrack, oldFiles []PendingFile) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	var err error
 	var oldOriginal, oldPlayable string
 	var start float64
 	var end sql.NullFloat64
-	if err = tx.QueryRowContext(ctx, `SELECT original_path,playable_path,playback_start_seconds,playback_end_seconds FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, id, DefaultUserID).Scan(&oldOriginal, &oldPlayable, &start, &end); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT original_path,playable_path,playback_start_seconds,playback_end_seconds FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, id, currentuser.ID(ctx)).Scan(&oldOriginal, &oldPlayable, &start, &end); err != nil {
 		return err
 	}
 	if len(oldFiles) > 0 {
@@ -522,7 +577,7 @@ func replaceTrackTx(ctx context.Context, tx *sql.Tx, id string, replacement NewT
 			return err
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE tracks SET title=CASE WHEN custom_title=1 THEN title ELSE ? END,artist=CASE WHEN custom_artist=1 THEN artist ELSE ? END,album=?,file_name=?,original_content_type=?,playback_index_version=?,duration_probe_version=?,original_path=?,playable_path=?,content_type=?,size_bytes=?,duration_seconds=?,playback_start_seconds=?,playback_end_seconds=?,audio_version=audio_version+1,updated_at=? WHERE id=? AND owner_user_id=? AND original_path=? AND playable_path=?`, replacement.Title, replacement.Artist, replacement.Album, replacement.FileName, replacement.OriginalContentType, replacement.PlaybackIndexVersion, replacement.DurationProbeVersion, replacement.OriginalPath, replacement.PlayablePath, replacement.ContentType, replacement.SizeBytes, replacement.DurationSeconds, start, endValue, nowText(), id, DefaultUserID, oldOriginal, oldPlayable)
+	result, err := tx.ExecContext(ctx, `UPDATE tracks SET title=CASE WHEN custom_title=1 THEN title ELSE ? END,artist=CASE WHEN custom_artist=1 THEN artist ELSE ? END,album=?,file_name=?,original_content_type=?,playback_index_version=?,duration_probe_version=?,original_path=?,playable_path=?,content_type=?,size_bytes=?,duration_seconds=?,playback_start_seconds=?,playback_end_seconds=?,audio_version=audio_version+1,updated_at=? WHERE id=? AND owner_user_id=? AND original_path=? AND playable_path=?`, replacement.Title, replacement.Artist, replacement.Album, replacement.FileName, replacement.OriginalContentType, replacement.PlaybackIndexVersion, replacement.DurationProbeVersion, replacement.OriginalPath, replacement.PlayablePath, replacement.ContentType, replacement.SizeBytes, replacement.DurationSeconds, start, endValue, nowText(), id, currentuser.ID(ctx), oldOriginal, oldPlayable)
 	if err = requireOne(result, err); err != nil {
 		return err
 	}
@@ -557,7 +612,10 @@ func (s *Store) FailPendingFile(ctx context.Context, path string, failure error)
 }
 
 func (s *Store) PurgeCandidates(ctx context.Context, now time.Time) ([]Track, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,deleted_at,purge_eligible_at,purge_error FROM tracks WHERE owner_user_id=? AND deleted_at IS NOT NULL AND purge_eligible_at<=? ORDER BY purge_eligible_at`, DefaultUserID, now.UTC().Format(time.RFC3339Nano))
+	if err := currentuser.Require(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,deleted_at,purge_eligible_at,purge_error FROM tracks WHERE owner_user_id=? AND deleted_at IS NOT NULL AND purge_eligible_at<=? ORDER BY purge_eligible_at`, currentuser.ID(ctx), now.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
@@ -574,13 +632,19 @@ func (s *Store) PurgeCandidates(ctx context.Context, now time.Time) ([]Track, er
 }
 
 func (s *Store) PurgeTrack(ctx context.Context, id string, now time.Time) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NOT NULL AND purge_eligible_at<=?`, id, DefaultUserID, now.UTC().Format(time.RFC3339Nano))
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NOT NULL AND purge_eligible_at<=?`, id, currentuser.ID(ctx), now.UTC().Format(time.RFC3339Nano))
 	return requireOne(result, err)
 }
 
 func (s *Store) RecordPurgeError(ctx context.Context, id string, failure error) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE tracks SET purge_error=? WHERE id=?`, failure.Error(), id)
-	return err
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE tracks SET purge_error=? WHERE id=? AND owner_user_id=?`, failure.Error(), id, currentuser.ID(ctx))
+	return requireOne(result, err)
 }
 
 func (s *Store) Usage(ctx context.Context) (int64, error) {
@@ -590,21 +654,34 @@ func (s *Store) Usage(ctx context.Context) (int64, error) {
 }
 
 func softDeleteTrackTx(ctx context.Context, tx *sql.Tx, id string, now time.Time) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	deleted := now.UTC()
-	result, err := tx.ExecContext(ctx, `UPDATE tracks SET deleted_at=?,purge_eligible_at=?,purge_error='',updated_at=? WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, deleted.Format(time.RFC3339Nano), deleted.Add(72*time.Hour).Format(time.RFC3339Nano), deleted.Format(time.RFC3339Nano), id, DefaultUserID)
+	result, err := tx.ExecContext(ctx, `UPDATE tracks SET deleted_at=?,purge_eligible_at=?,purge_error='',updated_at=? WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, deleted.Format(time.RFC3339Nano), deleted.Add(72*time.Hour).Format(time.RFC3339Nano), deleted.Format(time.RFC3339Nano), id, currentuser.ID(ctx))
 	return requireOne(result, err)
 }
 
 func addTrackTx(ctx context.Context, tx *sql.Tx, playlistID, trackID, itemID string) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
 	var position int
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),-1)+1 FROM playlist_items WHERE playlist_id=?`, playlistID).Scan(&position); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO playlist_items(id,playlist_id,track_id,position,created_at) VALUES(?,?,?,?,?)`, itemID, playlistID, trackID, position, nowText())
-	return err
+	result, err := tx.ExecContext(ctx, `INSERT INTO playlist_items(id,playlist_id,track_id,position,created_at) SELECT ?,p.id,t.id,?,? FROM playlists p,tracks t WHERE p.id=? AND p.owner_user_id=? AND t.id=? AND t.owner_user_id=? AND t.deleted_at IS NULL`, itemID, position, nowText(), playlistID, currentuser.ID(ctx), trackID, currentuser.ID(ctx))
+	return requireOne(result, err)
 }
 
 func compactPlaylistTx(ctx context.Context, tx *sql.Tx, playlistID string) error {
+	if err := currentuser.Require(ctx); err != nil {
+		return err
+	}
+	var owned string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM playlists WHERE id=? AND owner_user_id=?`, playlistID, currentuser.ID(ctx)).Scan(&owned); err != nil {
+		return err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM playlist_items WHERE playlist_id=? ORDER BY position`, playlistID)
 	if err != nil {
 		return err

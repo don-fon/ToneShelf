@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 )
@@ -9,7 +8,7 @@ import (
 func TestUploadPlaylistActivationAndRestart(t *testing.T) {
 	for _, mode := range []string{"ordinary", "default", "legacy", "deleted"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testContext()
 			path := filepath.Join(t.TempDir(), "test.db")
 			s, err := Open(ctx, path)
 			if err != nil {
@@ -71,7 +70,7 @@ func TestUploadPlaylistActivationAndRestart(t *testing.T) {
 }
 
 func TestUploadPlaylistOwnership(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO users(id,display_name,created_at) VALUES('other','Other',?)`, nowText()); err != nil {
 		t.Fatal(err)
@@ -83,9 +82,8 @@ func TestUploadPlaylistOwnership(t *testing.T) {
 	if err != nil || exists {
 		t.Fatalf("foreign visible %v %v", exists, err)
 	}
-	job, candidate := prepareConflictJob(t, s, "new", "new song", "foreign")
-	if _, err = s.CompleteJob(ctx, job, candidate, nil); err != nil {
-		t.Fatal(err)
+	if err = s.CreateJob(ctx, UploadJob{ID: "new", PlaylistID: "foreign", FileName: "new", SourcePath: "source", OutputPath: "output"}); err == nil {
+		t.Fatal("accepted foreign upload playlist")
 	}
 	var count int
 	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlist_items WHERE playlist_id='foreign'`).Scan(&count); err != nil || count != 0 {

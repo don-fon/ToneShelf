@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 )
@@ -36,7 +35,7 @@ func TestEnsureLyricsOffset(t *testing.T) {
 }
 
 func TestSavedLyricsOffsetSurvivesRestartAndCanBeCleared(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	path := filepath.Join(t.TempDir(), "lyrics.db")
 	s, err := Open(ctx, path)
 	if err != nil {

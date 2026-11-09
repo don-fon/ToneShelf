@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"math"
 	"os"
 	"path/filepath"
@@ -17,7 +16,7 @@ func TestLegacyAACDurationCorrectedAcrossRestart(t *testing.T) {
 			name = "already indexed"
 		}
 		t.Run(name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testContext()
 			api, old, db := legacyAudioFixture(t, "aac")
 			// Simulate the old bitrate-derived duration and an already known MIME.
 			index := 0
@@ -112,7 +111,7 @@ func TestLegacyAACDurationCorrectedAcrossRestart(t *testing.T) {
 }
 
 func TestAACProbeFailureLeavesRecordRetryable(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	api, old, _ := legacyAudioFixture(t, "aac")
 	api.Media.FFmpeg = "missing-ffmpeg-executable"
 	if err := api.RecoverJobs(ctx); err != nil {

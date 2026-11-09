@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -12,7 +11,7 @@ import (
 func TestDeleteCancelledJobRequiresCompletedCleanup(t *testing.T) {
 	for _, state := range []string{"receiving", "queued", "processing", "succeeded", "failed"} {
 		t.Run(state, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testContext()
 			s := openTestStore(t)
 			if err := s.CreateJob(ctx, UploadJob{ID: "job", FileName: "file", SourcePath: "source", OutputPath: "output"}); err != nil {
 				t.Fatal(err)
@@ -51,7 +50,7 @@ func TestDeleteCancelledJobRequiresCompletedCleanup(t *testing.T) {
 }
 
 func TestConcurrentReservationsNeverExceedQuota(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	var accepted atomic.Int64
 	var workers sync.WaitGroup
@@ -79,7 +78,7 @@ func TestConcurrentReservationsNeverExceedQuota(t *testing.T) {
 }
 
 func TestUploadBatchConcurrencyAndTailReservation(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	s := openTestStore(t)
 	var total atomic.Int64
 	var workers sync.WaitGroup
@@ -107,7 +106,7 @@ func TestUploadBatchConcurrencyAndTailReservation(t *testing.T) {
 }
 
 func TestQueueUploadSettlesHeadroomAtomicallyAndPersists(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	path := filepath.Join(t.TempDir(), "batch.db")
 	s, err := Open(ctx, path)
 	if err != nil {
@@ -150,7 +149,7 @@ func TestQueueUploadSettlesHeadroomAtomicallyAndPersists(t *testing.T) {
 }
 
 func TestJobActivationIsAtomicAndSurvivesRestart(t *testing.T) {
-	ctx := context.Background()
+	ctx := testContext()
 	path := filepath.Join(t.TempDir(), "jobs.db")
 	s, err := Open(ctx, path)
 	if err != nil {

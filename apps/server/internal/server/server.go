@@ -25,12 +25,13 @@ import (
 const QuotaBytes int64 = 10 * 1024 * 1024 * 1024
 
 type API struct {
-	Store      *store.Store
-	Media      *media.Processor
-	Lyrics     *lyrics.Client
-	Log        *slog.Logger
-	WebDir     string
-	QuotaLimit int64
+	Store       *store.Store
+	Media       *media.Processor
+	Lyrics      *lyrics.Client
+	Log         *slog.Logger
+	WebDir      string
+	QuotaLimit  int64
+	ResolveUser UserResolver
 
 	maintenanceMu sync.Mutex
 }
@@ -38,6 +39,7 @@ type API struct {
 func (a *API) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, middleware.Timeout(30*time.Minute))
+	r.Use(a.withCurrentUser)
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
