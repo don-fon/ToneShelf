@@ -54,7 +54,7 @@ func (a *API) maintainUser(ctx context.Context) {
 	for _, track := range candidates {
 		var removeErr error
 		seen := make(map[string]bool)
-		for _, path := range []string{track.OriginalPath, track.PlayablePath} {
+		for _, path := range []string{track.OriginalPath, track.PlayablePath, track.CoverPath} {
 			if path == "" || seen[path] {
 				continue
 			}

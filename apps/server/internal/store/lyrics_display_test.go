@@ -112,7 +112,7 @@ func TestRemoveLyricsInferenceMigrationPreservesTextAndOtherSettings(t *testing.
 		t.Fatal(err)
 	}
 	for _, id := range []string{"retired", "independent"} {
-		if _, err = s.InsertTrack(ctx, NewTrack{ID: id, Title: id, DurationSeconds: 10}); err != nil {
+		if _, err = s.db.ExecContext(ctx, `INSERT INTO tracks(id,owner_user_id,title,original_path,playable_path,size_bytes,duration_seconds,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, id, DefaultUserID, id, "", "", 0, 10, nowText(), nowText()); err != nil {
 			t.Fatal(err)
 		}
 	}

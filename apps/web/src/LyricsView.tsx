@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { LyricsLayout, LyricsPrimaryLine } from '@music/domain'
+import { TrackCover } from './TrackCover'
 import { LyricText } from './LyricText'
 import { activeLyricIndex, parseLyrics } from '@music/player-policy'
 
 const LYRICS_ANIMATION_LEAD_SECONDS = 0.3
 
 interface LyricsViewProps {
+  coverURL?: string
   trackTitle?: string
   lyrics: string
   layout?: LyricsLayout
@@ -15,7 +17,7 @@ interface LyricsViewProps {
   onSeek: (seconds: number) => void
 }
 
-export function LyricsView({ trackTitle, lyrics, layout, primaryLine, position, viewKey, onSeek }: LyricsViewProps) {
+export function LyricsView({ coverURL, trackTitle, lyrics, layout, primaryLine, position, viewKey, onSeek }: LyricsViewProps) {
   const parsed = useMemo(() => parseLyrics(lyrics, { layout, primaryLine }), [lyrics, layout, primaryLine])
   const activeIndex = parsed.synced ? activeLyricIndex(parsed.lines, position + LYRICS_ANIMATION_LEAD_SECONDS) : -1
   const activeRef = useRef<HTMLButtonElement | null>(null)
@@ -40,6 +42,8 @@ export function LyricsView({ trackTitle, lyrics, layout, primaryLine, position, 
 
   if (!trackTitle) return null
   return <section className="lyrics-panel" aria-label="播放歌词">
+    <TrackCover src={coverURL} className="lyrics-cover-background" background/>
+    <div className="lyrics-cover-veil" aria-hidden="true"/>
     <header><div><small>正在播放</small><h2>{trackTitle}</h2></div><span>{parsed.synced ? 'LRC 同步歌词' : '歌词'}</span></header>
     {!parsed.lines.length ? <div className="lyrics-empty">暂无歌词，可在歌曲设置中添加或在线匹配。</div> :
       <div ref={scrollRef} className={`lyrics-scroll ${parsed.synced ? 'synced' : 'plain'}`} tabIndex={0} aria-label="歌词内容">

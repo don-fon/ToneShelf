@@ -106,7 +106,7 @@ func (a *API) recoverUserJobs(ctx context.Context) error {
 			job.State = "failed"
 			a.cleanFailedJob(ctx, job)
 		case "processing":
-			if job.Kind == "repair" {
+			if job.Kind == "repair" || job.Kind == "cover" {
 				if err = removeCandidate(job.OutputPath); err != nil {
 					if stateErr := a.Store.SetJobState(ctx, job.ID, "processing", "failed", err.Error()); stateErr != nil {
 						return stateErr
@@ -136,6 +136,9 @@ func (a *API) recoverUserJobs(ctx context.Context) error {
 				}
 				a.cleanFailedJob(ctx, job)
 				continue
+			}
+			if err = removeCandidate(job.OutputPath + ".cover.jpg"); err != nil {
+				return err
 			}
 			info, statErr := os.Stat(job.SourcePath)
 			if statErr != nil {
@@ -209,6 +212,10 @@ func canonicalPath(path string) string {
 }
 
 func (a *API) processJob(ctx context.Context, job store.UploadJob) {
+	if job.Kind == "cover" {
+		a.processCover(ctx, job)
+		return
+	}
 	if job.Kind == "repair" {
 		a.processRepair(ctx, job)
 		return
@@ -227,7 +234,7 @@ func (a *API) processJob(ctx context.Context, job store.UploadJob) {
 			}
 		}
 		if err == nil {
-			_, err = a.Store.CompleteJob(ctx, job, store.NewTrack{ID: result.ID, Title: result.Title, Artist: result.Artist, Album: result.Album, FileName: job.FileName, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, OriginalContentType: result.OriginalContentType, PlaybackIndexVersion: 1, DurationProbeVersion: 1, SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds}, oldFiles)
+			_, err = a.Store.CompleteJob(ctx, job, store.NewTrack{ID: result.ID, CoverPath: result.CoverPath, Title: result.Title, Artist: result.Artist, Album: result.Album, FileName: job.FileName, OriginalPath: result.OriginalPath, PlayablePath: result.PlayablePath, ContentType: result.ContentType, OriginalContentType: result.OriginalContentType, PlaybackIndexVersion: 1, DurationProbeVersion: 1, SizeBytes: result.SizeBytes, DurationSeconds: result.DurationSeconds}, oldFiles)
 		}
 	}
 	if errors.Is(err, store.ErrUploadConflict) {
@@ -244,8 +251,8 @@ func (a *API) processJob(ctx context.Context, job store.UploadJob) {
 }
 
 func (a *API) cleanFailedJob(ctx context.Context, job store.UploadJob) {
-	paths := []string{job.OutputPath, job.OutputPath + ".stream"}
-	if job.Kind != "repair" {
+	paths := []string{job.OutputPath, job.OutputPath + ".stream", job.OutputPath + ".cover.jpg"}
+	if job.Kind != "repair" && job.Kind != "cover" {
 		paths = append(paths, job.SourcePath)
 	}
 	for _, path := range paths {

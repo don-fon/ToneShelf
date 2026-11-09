@@ -77,7 +77,7 @@ export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
       }).finally(() => { setChecking((items) => items.filter((item) => item.id !== id)); void query.invalidateQueries({ queryKey: ['quota'] }) })
     }
   }
-  const userJobs = jobs.filter((job) => job.kind !== 'repair' && job.kind !== 'preflight' && !(job.state === 'failed' && job.error === '已取消'))
+  const userJobs = jobs.filter((job) => job.kind !== 'repair' && job.kind !== 'cover' && job.kind !== 'preflight' && !(job.state === 'failed' && job.error === '已取消'))
   const resolve = async (id: string, overwrite: boolean) => {
     setDeciding((items) => [...items, id])
     setDecisionError('')

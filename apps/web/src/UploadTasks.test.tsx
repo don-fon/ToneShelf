@@ -157,8 +157,8 @@ describe('upload task UI', () => {
     expect(api.jobs).toHaveBeenCalledTimes(1)
   })
 
-  it.each(['queued', 'processing', 'succeeded', 'failed'] as const)('hides internal repair tasks in state %s', async (state) => {
-    vi.mocked(api.jobs).mockResolvedValue([{ id: 'repair', kind: 'repair', fileName: 'internal.mp3', targetTrackId: 'song', state, reservedBytes: 0, createdAt: '' }])
+  it.each((['repair', 'cover'] as const).flatMap((kind) => (['queued', 'processing', 'succeeded', 'failed'] as const).map((state) => ({ kind, state }))))('hides internal $kind tasks in state $state', async ({ kind, state }) => {
+    vi.mocked(api.jobs).mockResolvedValue([{ id: 'internal', kind, fileName: 'internal.mp3', targetTrackId: 'song', state, reservedBytes: 0, createdAt: '' }])
     const { client } = renderTasks()
     await waitFor(() => expect(client.getQueryState(['jobs'])?.status).toBe('success'))
     expect(screen.queryByText('internal.mp3')).toBeNull()

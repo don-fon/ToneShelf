@@ -13,9 +13,9 @@ import (
 )
 
 type Result struct {
-	ID, Title, Artist, Album, OriginalPath, PlayablePath, ContentType, OriginalContentType string
-	SizeBytes                                                                              int64
-	DurationSeconds                                                                        float64
+	ID, Title, Artist, Album, OriginalPath, PlayablePath, ContentType, OriginalContentType, CoverPath string
+	SizeBytes                                                                                         int64
+	DurationSeconds                                                                                   float64
 }
 
 type Processor struct {

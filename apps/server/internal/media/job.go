@@ -23,7 +23,7 @@ func (p *Processor) Process(ctx context.Context, id, name, source, output string
 	}
 	result := Result{ID: id, Title: first(meta.tags, "title", strings.TrimSuffix(name, extension(name))), Artist: first(meta.tags, "artist", ""), Album: first(meta.tags, "album", ""), OriginalPath: source, PlayablePath: source, ContentType: "audio/mpeg", OriginalContentType: meta.contentType, SizeBytes: info.Size(), DurationSeconds: meta.duration}
 	if meta.codec == "mp3" {
-		return result, nil
+		return p.withCover(ctx, result, source, output, reserve)
 	}
 	// Reserve an estimated upper bound first; expand atomically before writing
 	// if actual output exceeds it. Unused bytes are settled on activation.
@@ -64,7 +64,7 @@ func (p *Processor) Process(ctx context.Context, id, name, source, output string
 	}
 	result.PlayablePath = output
 	result.SizeBytes += size
-	return result, nil
+	return p.withCover(ctx, result, source, output, reserve)
 }
 
 type reservedWriter struct {
@@ -91,4 +91,14 @@ func extension(name string) string {
 		return name[index:]
 	}
 	return ""
+}
+
+func (p *Processor) withCover(ctx context.Context, result Result, source, output string, reserve func(int64) error) (Result, error) {
+	path, size, err := p.ExtractCover(ctx, source, output+".cover.jpg", reserve)
+	if err != nil {
+		return Result{}, err
+	}
+	result.CoverPath = path
+	result.SizeBytes += size
+	return result, nil
 }

@@ -195,7 +195,7 @@ func (s *Store) Quota(ctx context.Context) (used, reserved int64, err error) {
 }
 
 func (s *Store) KnownMediaPaths(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT original_path FROM tracks UNION SELECT playable_path FROM tracks UNION SELECT path FROM pending_file_deletions UNION SELECT source_path FROM upload_jobs UNION SELECT output_path FROM upload_jobs UNION SELECT output_path||'.stream' FROM upload_jobs`)
+	rows, err := s.db.QueryContext(ctx, `SELECT original_path FROM tracks UNION SELECT cover_path FROM tracks WHERE cover_path<>'' UNION SELECT playable_path FROM tracks UNION SELECT path FROM pending_file_deletions UNION SELECT source_path FROM upload_jobs UNION SELECT output_path FROM upload_jobs UNION SELECT output_path||'.stream' FROM upload_jobs UNION SELECT output_path||'.cover.jpg' FROM upload_jobs`)
 	if err != nil {
 		return nil, err
 	}

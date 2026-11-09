@@ -20,6 +20,7 @@ func (a *API) ScheduleMediaMaintenance(ctx context.Context) {
 	}
 	for _, id := range users {
 		a.scheduleUserMediaMaintenance(currentuser.WithID(ctx, id))
+		a.scheduleUserCovers(currentuser.WithID(ctx, id))
 	}
 }
 

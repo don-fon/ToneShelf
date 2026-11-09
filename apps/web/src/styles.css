@@ -87,7 +87,8 @@
 .music-workspace .lyrics-panel header>div{min-width:0}
 .music-workspace .lyrics-panel h2{font-size:18px;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .music-workspace .lyrics-panel header>span{flex-shrink:0;font-size:11px}
-.music-workspace .lyrics-scroll{flex:1;min-height:0;height:auto;max-height:none;overscroll-behavior:contain;scrollbar-gutter:stable;padding:var(--lyrics-edge,96px) 0}
+.music-workspace .lyrics-scroll{flex:1;min-height:0;height:auto;max-height:none;overscroll-behavior:contain;scrollbar-gutter:stable;padding:0}
+.music-workspace .lyrics-scroll.synced::before,.music-workspace .lyrics-scroll.synced::after{content:"";display:block;height:var(--lyrics-edge,96px)}
 .music-workspace .lyrics-scroll.plain{padding:24px 8px}
 .music-workspace .lyrics-empty{margin:auto;padding:24px 12px}
 .music-workspace>.lyrics-placeholder{align-items:center;justify-content:center;color:#aaa19a}
@@ -151,3 +152,4 @@ aside nav{min-height:0;overflow:auto;overscroll-behavior:contain}
 @media(max-width:800px){.list-scroll .track{grid-template-columns:44px minmax(0,1fr) 64px}.track-actions{gap:0}.playlist-transfer{gap:8px}.playlist-transfer span{min-width:0;overflow-wrap:anywhere}}
 .list-scroll .track{grid-template-columns:48px minmax(0,1fr) 50px 36px}.playlist-transfer{flex-wrap:wrap}.playlist-transfer .delete-selected{color:#b7432c}.selection-error{font-size:12px;margin:6px 0;flex-shrink:0}.song-settings .actions{display:flex;justify-content:flex-end}
 @media(max-width:800px){.list-scroll .track{grid-template-columns:44px minmax(0,1fr) 36px}}
+.cover,.track-cover{flex-shrink:0;overflow:hidden}.cover img,.track-cover img{width:100%;height:100%;object-fit:cover}.track-info{display:flex;align-items:center;gap:12px;min-width:0}.track-meta{min-width:0}.track-cover{display:grid;place-items:center;width:40px;height:40px;border-radius:6px;background:#e9dfd5;color:#aa8068;font-size:20px}.lyrics-panel{position:relative;isolation:isolate;overflow:hidden}.lyrics-cover-background{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.3;filter:blur(6px);transform:scale(1.04);pointer-events:none;z-index:0}.lyrics-cover-veil{position:absolute;inset:0;background:linear-gradient(180deg,#201b1850,#201b1899);pointer-events:none;z-index:1}.lyrics-panel>header,.lyrics-panel>.lyrics-scroll,.lyrics-panel>.lyrics-empty{position:relative;z-index:2}@media(max-width:800px){.track-info{gap:8px}.track-cover{width:34px;height:34px}}

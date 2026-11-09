@@ -16,6 +16,7 @@ export interface Track {
   lyrics: string
   lyricsLayout?: LyricsLayout
   lyricsPrimaryLine?: LyricsPrimaryLine
+  coverUrl?: string
   audioUrl: string
   originalAudioUrl?: string
   originalContentType?: string
@@ -41,7 +42,7 @@ export interface UploadJob {
   id: string
   fileName: string
   requestKey?: string
-  kind?: 'upload' | 'repair' | 'preflight'
+  kind?: 'upload' | 'repair' | 'cover' | 'preflight'
   targetTrackId?: string
   trackId?: string
   state: 'receiving' | 'queued' | 'processing' | 'succeeded' | 'failed'

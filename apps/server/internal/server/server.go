@@ -61,6 +61,7 @@ func (a *API) Handler() http.Handler {
 	r.Get("/api/trash", a.trash)
 	r.Get("/api/tracks/{trackID}/lyrics/search", a.searchLyrics)
 	r.Get("/api/tracks/{trackID}/audio", a.audio)
+	r.Get("/api/tracks/{trackID}/cover", a.cover)
 	r.Get("/api/quota", a.quota)
 	if a.WebDir != "" {
 		r.Handle("/*", spaHandler(a.WebDir))
@@ -302,7 +303,7 @@ func (a *API) fail(w http.ResponseWriter, err error) {
 func storedFiles(track store.Track) []store.PendingFile {
 	seen := make(map[string]bool)
 	files := make([]store.PendingFile, 0, 2)
-	for _, path := range []string{track.OriginalPath, track.PlayablePath} {
+	for _, path := range []string{track.OriginalPath, track.PlayablePath, track.CoverPath} {
 		if path == "" || seen[path] {
 			continue
 		}

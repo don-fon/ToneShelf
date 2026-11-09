@@ -680,3 +680,10 @@ Linux 日志默认写入标准输出和标准错误，由 `systemd-journald` 或
 | 发布 | Windows x64、Linux x64、Linux ARM64；网页通过 `go:embed` 嵌入 |
 | 数据目录 | Windows `%LOCALAPPDATA%/MusicPlayer/`；Linux `/var/lib/music-player/` |
 | 备份 | Windows/Linux 均采用停服后的完整目录冷备份 |
+### 14.11 封面派生文件
+
+使用 ffprobe 的 `attached_pic` 标记选择第一张内嵌图片，由 FFmpeg 输出等比缩放、最长边 512 像素、质量参数 `-q:v 4` 的 JPEG。不将普通视频帧当作封面，也不依赖浏览器解码上传文件里的图片格式。派生文件写入前预留容量，最终大小计入歌曲总容量。
+
+迁移 `011_track_covers.sql` 增加 `cover_path` 与 `cover_scan_version`。上传和音频替换在原有任务中处理封面，原子提交歌曲、音频和封面引用。旧记录通过内部 `cover` 持久化任务补提取，启动和定期维护时调度；处理中重启会清除候选图片、释放任务预留后重排队，失败清理不得删除原音频。完成时检查用户、源文件版本及任务预留，避免将旧版本图片关联到替换后的音频。未发现封面也记录已扫描，避免重复扫描。
+
+`GET /api/tracks/{trackID}/cover` 校验当前用户及歌曲有效状态，以 `image/jpeg` 返回图片；客户端使用带音频版本的 `coverUrl` 缓存，替换后更新地址。内部封面任务不展示在上传列表中，客户端仍跟踪其结束以刷新歌曲数据。封面路径使用服务器生成的标识，纳入候选文件恢复、替换清理、回收站与容量统计。
