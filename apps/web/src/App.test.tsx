@@ -23,6 +23,8 @@ vi.mock('./api', () => ({ api: {
   ] }),
   removeTrack: vi.fn().mockResolvedValue({ trackDeleted: true }),
   updateTrack: vi.fn().mockResolvedValue({}),
+  replaceCover: vi.fn(),
+  replaceAudio: vi.fn(),
   restoreTrack: vi.fn().mockResolvedValue({}),
   addTrack: vi.fn().mockResolvedValue(undefined),
   moveTrack: vi.fn().mockResolvedValue(undefined),
@@ -42,6 +44,47 @@ const renderApp = () => {
 afterEach(() => { cleanup(); usePlayer.setState(usePlayer.getInitialState(), true); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
+  it('discards selected cover and audio files on cancel without uploading either', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:preview'); URL.revokeObjectURL = vi.fn()
+    vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    renderApp()
+    fireEvent.click(await screen.findByRole('button', { name: '设置 World is Mine' }))
+    fireEvent.change(screen.getByLabelText('选择封面图片'), { target: { files: [new File(['image'], 'cover.png')] } })
+    fireEvent.change(screen.getByLabelText('替换音频文件'), { target: { files: [new File(['audio'], 'new.mp3')] } })
+    await screen.findByAltText('新封面预览')
+    expect(screen.getByText('待替换音频：new.mp3')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(api.updateTrack).not.toHaveBeenCalled()
+    expect(api.replaceCover).not.toHaveBeenCalled()
+    expect(api.replaceAudio).not.toHaveBeenCalled()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
+    fireEvent.click(screen.getByRole('button', { name: '设置 World is Mine' }))
+    expect(screen.queryByAltText('新封面预览')).toBeNull()
+    expect(screen.queryByText('待替换音频：new.mp3')).toBeNull()
+  })
+
+  it('submits the selected cover through the main save button and waits for processing', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:preview'); URL.revokeObjectURL = vi.fn()
+    vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    let complete!: (job: Awaited<ReturnType<typeof api.replaceCover>>) => void
+    vi.mocked(api.replaceCover).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve }))
+    renderApp()
+    fireEvent.click(await screen.findByRole('button', { name: '设置 World is Mine' }))
+    const file = new File(['image'], 'cover.png')
+    fireEvent.change(screen.getByLabelText('选择封面图片'), { target: { files: [file] } })
+    fireEvent.change(screen.getByLabelText('歌曲名称'), { target: { value: 'Edited title' } })
+    expect(api.replaceCover).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '保存封面' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.replaceCover).toHaveBeenCalledExactlyOnceWith(track.id, file))
+    expect(vi.mocked(api.updateTrack).mock.calls[0][0].title).toBe('Edited title')
+    expect((screen.getByRole('button', { name: '保存中…' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByLabelText('歌曲名称') as HTMLInputElement).matches(':disabled')).toBe(true)
+    complete({ id: 'cover-job', kind: 'cover', state: 'succeeded', fileName: '', createdAt: '', reservedBytes: 0 })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '歌曲设置' })).toBeNull())
+  })
+
   it('moves selected songs even when the destination already includes them', async () => {
     const second = { ...track, id: 'second', title: 'Second' }
     vi.mocked(api.playlists).mockResolvedValueOnce([
@@ -282,7 +325,7 @@ describe('music library lifecycle', () => {
     fireEvent.change(screen.getByLabelText('歌曲名称'), { target: { value: '新名称' } })
     fireEvent.change(screen.getByLabelText('歌手'), { target: { value: '新歌手' } })
     fireEvent.click(screen.getByText('保存'))
-    await waitFor(() => expect(api.updateTrack).toHaveBeenCalledWith(expect.objectContaining({ title: '新名称', artist: '新歌手' }), expect.anything()))
+    await waitFor(() => expect(api.updateTrack).toHaveBeenCalledWith(expect.objectContaining({ title: '新名称', artist: '新歌手' })))
   })
 
   it('switches displayed filename order without manual move controls', async () => {

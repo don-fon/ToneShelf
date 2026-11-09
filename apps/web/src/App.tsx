@@ -5,6 +5,7 @@ import { advanceRecovery, selectNext, sortTracks } from '@music/player-policy'
 import { api } from './api'
 import { UploadTasks, audioAccept } from './UploadTasks'
 import { CoverPicker } from './CoverPicker'
+import { useSongSettingsSave } from './useSongSettingsSave'
 import { TrackCover } from './TrackCover'
 import { LyricsView } from './LyricsView'
 import { LyricsEditor } from './LyricsEditor'
@@ -31,8 +32,9 @@ export function App() {
   const current = active?.tracks.find((track) => track.id === player.trackID) ?? null
   const [engine] = useState(() => new WebAudioEngine())
   const audioReplacementInput = useRef<HTMLInputElement>(null)
-  const [coverBusy, setCoverBusy] = useState(false)
   const [editing, setEditing] = useState<Track | null>(null)
+  const settings = useSongSettingsSave(() => setEditing(null))
+  const { save } = settings
   const [selectedLyricsID, setSelectedLyricsID] = useState<number | null>(null)
   const [position, setPosition] = useState(player.position)
   const [playlistName, setPlaylistName] = useState('')
@@ -168,7 +170,6 @@ export function App() {
   }, [current?.id, current?.audioVersion, current?.playbackStartSeconds, current?.playbackEndSeconds, current?.durationSeconds, player.mode, active?.id, player.recovery])
 
   const create = useMutation({ mutationFn: api.createPlaylist, onSuccess: refresh })
-  const save = useMutation({ mutationFn: api.updateTrack, onSuccess: async () => { await refresh(); setEditing(null) } })
   const lyricsSearch = useMutation({ mutationFn: api.searchLyrics, onMutate: () => setSelectedLyricsID(null) })
   const removeSelected = async () => {
     if (!active || !selectedTracks.length || selectionBusy) return
@@ -220,7 +221,7 @@ export function App() {
         <button className="sort-toggle" aria-label="排序" title="排序" aria-expanded={showSort} aria-controls="track-sort-options" onClick={() => setShowSort(!showSort)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h12M4 12h8M4 18h4M18 10v10m-3-3 3 3 3-3"/></svg></button>
         {showSort && <div id="track-sort-options" className="sort-options" role="group" aria-label="排序选项">{(['uploadedAt', 'fileName'] as const).flatMap((field) => (['asc', 'desc'] as const).map((direction) => <button key={field + direction} aria-pressed={sortBy === field && sortDirection === direction} onClick={() => { setSortBy(field); setSortDirection(direction); setShowSort(false) }}>{field === 'uploadedAt' ? '上传时间' : '文件名'} · {direction === 'asc' ? '正序' : '逆序'}</button>))}</div>}
       </div></div>
-        {visibleTracks.map((track) => <div className={`track ${current?.id === track.id ? 'playing' : ''}`} key={track.id}><div className="track-leading"><input type="checkbox" aria-label={`选择 ${track.title}`} disabled={selectionBusy} checked={selectedTrackIDs.includes(track.id)} onChange={(event) => setSelectedTrackIDs((ids) => event.target.checked ? [...ids, track.id] : ids.filter((id) => id !== track.id))}/><button className="play" onClick={() => current?.id === track.id && player.playing ? player.setPlaying(false) : playTrack(track)}>{current?.id === track.id && player.playing ? 'Ⅱ' : '▶'}</button></div><div className="track-info"><TrackCover src={track.coverUrl} className="track-cover"/><div className="track-meta"><strong title={track.title}>{track.title}</strong><small>{trackSubtitle(track)}</small></div></div><span>{time(track.durationSeconds)}</span><div className="track-actions"><button className="edit" aria-label={`设置 ${track.title}`} title="歌曲设置" onClick={() => { lyricsSearch.reset(); setSelectedLyricsID(null); setEditing({ ...track }) }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none"/></svg></button></div></div>)}
+        {visibleTracks.map((track) => <div className={`track ${current?.id === track.id ? 'playing' : ''}`} key={track.id}><div className="track-leading"><input type="checkbox" aria-label={`选择 ${track.title}`} disabled={selectionBusy} checked={selectedTrackIDs.includes(track.id)} onChange={(event) => setSelectedTrackIDs((ids) => event.target.checked ? [...ids, track.id] : ids.filter((id) => id !== track.id))}/><button className="play" onClick={() => current?.id === track.id && player.playing ? player.setPlaying(false) : playTrack(track)}>{current?.id === track.id && player.playing ? 'Ⅱ' : '▶'}</button></div><div className="track-info"><TrackCover src={track.coverUrl} className="track-cover"/><div className="track-meta"><strong title={track.title}>{track.title}</strong><small>{trackSubtitle(track)}</small></div></div><span>{time(track.durationSeconds)}</span><div className="track-actions"><button className="edit" aria-label={`设置 ${track.title}`} title="歌曲设置" onClick={() => { settings.reset(); lyricsSearch.reset(); setSelectedLyricsID(null); setEditing({ ...track }) }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none"/></svg></button></div></div>)}
         {!active?.tracks.length && <div className="empty"><b>这里还没有音乐</b><span>上传一个音频文件开始播放</span></div>}
       </section>
       </div></div>
@@ -233,23 +234,27 @@ export function App() {
       return <button type="button" key={playlist.id} disabled={selectionBusy || !selectedTracks.length || (transferMode === 'add' && !missing)} onClick={() => void addTo(playlist.id)}><span>{playlist.name}</span><small>{addingTo === playlist.id ? '正在处理…' : transferMode === 'move' ? `移动 ${selectedTracks.length} 首` : missing ? `添加 ${missing} 首` : '已全部包含'}</small></button>
     })}{playlists.filter((playlist) => playlist.id !== active?.id).length === 0 && <p className="add-to-empty">请先在侧栏创建另一个歌单。</p>}</div>{transferError && <p className="error" role="alert">{transferError}</p>}<div className="add-to-actions"><button type="button" disabled={addingTo !== null} onClick={() => setShowAddTo(false)}>取消</button></div></form></div>}
 
-    {editing && <div className="modal"><form className="song-settings" role="dialog" aria-modal="true" aria-labelledby="song-settings-title" onSubmit={(event) => { event.preventDefault(); if (!coverBusy) save.mutate(editing) }}>
+    {editing && <div className="modal"><form className="song-settings" role="dialog" aria-modal="true" aria-labelledby="song-settings-title" onSubmit={(event) => { event.preventDefault(); if (!save.isPending && !settings.coverInvalid) save.mutate(editing) }}>
       <h2 id="song-settings-title">歌曲设置</h2>
+      <fieldset className="settings-fields" disabled={save.isPending}>
       <div className="settings-identity"><label>歌曲名称<input required value={editing.title} onChange={(event) => setEditing({ ...editing, title: event.target.value })}/></label><label>歌手<input value={editing.artist} onChange={(event) => setEditing({ ...editing, artist: event.target.value })}/></label></div>
       <div className="settings-playback">
         <div className="settings-tuning"><label>随机权重<input type="number" min={Number.MIN_VALUE} step="any" value={editing.baseRandomWeight} onChange={(event) => setEditing({ ...editing, baseRandomWeight: Number(event.target.value) })}/></label><label>单曲音量 {Math.round(editing.volumeRatio * 100)}%<input type="range" min="0" max="1" step="0.01" value={editing.volumeRatio} onChange={(event) => setEditing({ ...editing, volumeRatio: Number(event.target.value) })}/></label></div>
         <div className="range"><label>开始（秒）<input type="number" min="0" step="0.1" value={editing.playbackStartSeconds} onChange={(event) => setEditing({ ...editing, playbackStartSeconds: Number(event.target.value) })}/></label><label>结束（秒）<input type="number" min="0" step="0.1" value={editing.playbackEndSeconds ?? ''} onChange={(event) => setEditing({ ...editing, playbackEndSeconds: event.target.value === '' ? null : Number(event.target.value) })}/></label></div>
       </div>
       <div className="settings-files">
-      <CoverPicker key={editing.id} track={editing} onBusyChange={setCoverBusy}/>
-      <button className="settings-file-button settings-replace" type="button" disabled={coverBusy} onClick={() => audioReplacementInput.current?.click()}><span className="settings-file-icon" aria-hidden="true">♫</span><span>替换音频</span></button><input ref={audioReplacementInput} hidden type="file" aria-label="替换音频文件" disabled={coverBusy} accept={audioAccept} onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { await api.replaceAudio(editing.id, file); setEditing(null); await query.invalidateQueries({ queryKey: ['jobs'] }); await refresh() } catch (reason) { report(reason) } event.target.value = '' }}/>
+      <CoverPicker key={editing.id} track={editing} file={settings.coverFile} onChange={settings.setCoverFile} onInvalidChange={settings.setCoverInvalid}/>
+      <button className="settings-file-button settings-replace" type="button" onClick={() => audioReplacementInput.current?.click()}><span className="settings-file-icon" aria-hidden="true">♫</span><span>替换音频</span></button><input ref={audioReplacementInput} hidden type="file" aria-label="替换音频文件" accept={audioAccept} onChange={(event) => { const file = event.target.files?.[0]; if (file) settings.setAudioFile(file); event.target.value = '' }}/>
+      {settings.audioFile && <div className="audio-replacement-draft"><span>待替换音频：{settings.audioFile.name}</span></div>}
       </div>
       <LyricsEditor key={editing.id} lyrics={editing.lyrics} layout={editing.lyricsLayout} primaryLine={editing.lyricsPrimaryLine}
         onTextChange={(text) => { setSelectedLyricsID(null); setEditing({ ...editing, lyrics: text }) }}
         onDisplayChange={(options) => setEditing({ ...editing, ...options })}
         actions={<button type="button" onClick={() => lyricsSearch.mutate(editing.id)} disabled={lyricsSearch.isPending}>{lyricsSearch.isPending ? '正在搜索…' : '从 LRCLIB 匹配'}</button>} searchResults={<>{lyricsSearch.error && <small className="error">{lyricsSearch.error.message}</small>}{lyricsSearch.data && <div className="lyrics-results"><small>使用“{lyricsSearch.data.queryTitle}”{lyricsSearch.data.queryArtist ? ` / “${lyricsSearch.data.queryArtist}”` : ''}找到 {lyricsSearch.data.candidates.length} 个候选{lyricsSearch.data.expandedSearch ? '（已补充仅歌名搜索）' : ''}</small>{lyricsSearch.data.candidates.map((candidate) => <button type="button" className={selectedLyricsID === candidate.id ? 'selected' : ''} key={candidate.id} onClick={() => { setSelectedLyricsID(candidate.id); setEditing({ ...editing, lyrics: candidate.lyrics }) }}><strong>{candidate.trackName}</strong><span>{candidate.artistName || '未知艺术家'} · {time(candidate.duration)} · {candidate.synced ? '同步歌词' : '纯文本'}</span></button>)}{!lyricsSearch.data.candidates.length && <span className="no-result">没有找到可用歌词</span>}</div>}</>}/>
-      {save.error && <p className="error">{save.error.message}</p>}
-      <div className="actions"><button type="button" disabled={coverBusy} onClick={() => setEditing(null)}>取消</button><button className="primary" disabled={coverBusy}>保存</button></div>
+      </fieldset>
+      {settings.status && <small className="settings-save-status" role="status">{settings.status}</small>}
+      {save.error && <p className="error" role="alert">{save.error.message}</p>}
+      <div className="actions"><button type="button" disabled={save.isPending} onClick={() => { settings.reset(); setEditing(null) }}>取消</button><button className="primary" disabled={save.isPending || settings.coverInvalid}>{save.isPending ? '保存中…' : '保存'}</button></div>
     </form></div>}
 
     <footer className="player"><div className="now"><TrackCover src={current?.coverUrl}/><div><strong>{current?.title ?? '选择一首音乐'}</strong><small>{current?.artist || '尚未播放'}</small></div></div><div className="controls"><div><button onClick={() => player.setMode(player.mode === 'random' ? 'repeat-one' : 'random')}>{player.mode === 'random' ? '⤨' : '↻'}</button><button className="main" aria-label={player.playing ? '暂停' : '播放'} disabled={!current && (player.mode !== 'random' || !active?.tracks.length)} onClick={() => { if (current) player.setPlaying(!player.playing); else if (player.mode === 'random') next() }}>{player.playing ? 'Ⅱ' : '▶'}</button><button disabled={!active?.tracks.length} onClick={next}>▶|</button></div><label><span>{time(position)}</span><input type="range" min={current?.playbackStartSeconds ?? 0} max={current?.playbackEndSeconds ?? current?.durationSeconds ?? 1} step="0.1" value={position} onChange={(event) => { seek(Number(event.target.value)) }}/><span>{time(current?.playbackEndSeconds ?? current?.durationSeconds)}</span></label></div><label className="volume">♪<input type="range" min="0" max="1" step="0.01" value={player.masterVolume} onChange={(event) => player.setMasterVolume(Number(event.target.value))}/></label></footer>
