@@ -12,8 +12,7 @@ interface Props {
 
 export function LyricsDisplaySettings({ lyrics, layout = 'timestamp', primaryLine = 'first', onChange }: Props) {
   const parsed = useMemo(() => parseLyrics(lyrics, { layout, primaryLine }), [lyrics, layout, primaryLine])
-  return <details className="lyrics-display-settings">
-    <summary>歌词显示</summary>
+  return <div className="lyrics-display-settings">
     <div className="lyrics-display-row"><label>分组方式<select value={layout} onChange={(event) => onChange({ lyricsLayout: event.target.value as LyricsLayout, lyricsPrimaryLine: primaryLine })}>
       <option value="timestamp">按时间戳分组</option>
       <option value="separate">每行独立显示</option>
@@ -24,5 +23,5 @@ export function LyricsDisplaySettings({ lyrics, layout = 'timestamp', primaryLin
     </select></label>
     </div>
     <LyricsPreview parsed={parsed}/>
-  </details>
+  </div>
 }

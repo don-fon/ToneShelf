@@ -11,7 +11,6 @@ it('only offers timestamp grouping and independent lines without a pairing sugge
   expect(screen.queryByText(/句尾|可能存在/)).toBeNull()
   expect(screen.queryByLabelText('整体偏移（秒）')).toBeNull()
   expect(onChange).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByText('歌词显示'))
   expect(screen.getByLabelText('分组方式')).toHaveProperty('value', 'timestamp')
   expect(screen.getByLabelText('分组方式').querySelectorAll('option')).toHaveLength(2)
   expect(screen.getByRole('region', { name: '歌词显示预览' }).querySelectorAll('p')).toHaveLength(4)
