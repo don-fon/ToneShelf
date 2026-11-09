@@ -41,7 +41,7 @@ const renderApp = () => {
   return render(<QueryClientProvider client={client}><App /></QueryClientProvider>)
 }
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
   it('adds selected songs to another playlist and skips songs already present', async () => {
@@ -171,14 +171,74 @@ describe('music library lifecycle', () => {
     vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderApp()
-    fireEvent.click(await screen.findByLabelText('从歌单移除 World is Mine'))
+    const remove = await screen.findByRole('button', { name: '删除' })
+    expect((remove as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByLabelText('从歌单移除 World is Mine')).toBeNull()
+    fireEvent.click(screen.getByLabelText('选择 World is Mine'))
+    fireEvent.click(remove)
     await waitFor(() => expect(api.removeTrack).toHaveBeenCalledWith('default', 'track-1', true))
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('将进入回收站'))
+  })
+
+  it('confirms a mixed batch once and only authorizes deletion of default-only songs', async () => {
+    const shared = { ...track, id: 'shared', title: 'Shared' }
+    vi.mocked(api.playlists).mockResolvedValueOnce([
+      { id: 'default', name: '默认歌单', isDefault: true, tracks: [track, shared] },
+      { id: 'other', name: '其他歌单', isDefault: false, tracks: [shared] },
+    ])
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderApp()
+    fireEvent.click(await screen.findByLabelText('全选歌曲'))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(api.removeTrack).toHaveBeenCalledTimes(2))
+    expect(api.removeTrack).toHaveBeenCalledWith('default', track.id, true)
+    expect(api.removeTrack).toHaveBeenCalledWith('default', 'shared', false)
+    expect(window.confirm).toHaveBeenCalledTimes(1)
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('其中 1 首'))
+  })
+
+  it('removes from an ordinary playlist without authorizing global deletion', async () => {
+    vi.mocked(api.playlists).mockResolvedValueOnce([
+      { id: 'ordinary', name: '普通歌单', isDefault: false, tracks: [track] },
+      { id: 'default', name: '默认歌单', isDefault: true, tracks: [] },
+    ])
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderApp()
+    fireEvent.click(await screen.findByLabelText('选择 World is Mine'))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(api.removeTrack).toHaveBeenCalledExactlyOnceWith('ordinary', track.id, false))
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('音乐文件会保留'))
+  })
+
+  it('keeps the selection and sends no requests when deletion is cancelled', async () => {
+    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderApp()
+    fireEvent.click(await screen.findByLabelText('选择 World is Mine'))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(api.removeTrack).not.toHaveBeenCalled()
+    expect((screen.getByLabelText('选择 World is Mine') as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('keeps failed deletion selections for retry without repeating successful requests', async () => {
+    const second = { ...track, id: 'second', title: 'Second' }
+    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track, second] }]).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [second] }])
+    vi.mocked(api.removeTrack).mockResolvedValueOnce({ trackDeleted: true }).mockRejectedValueOnce(new Error('failed'))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderApp()
+    fireEvent.click(await screen.findByLabelText('全选歌曲'))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('已删除 1 首，1 首失败')
+    expect((screen.getByLabelText('选择 Second') as HTMLInputElement).checked).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(vi.mocked(api.removeTrack).mock.calls).toEqual([['default', track.id, true], ['default', 'second', true], ['default', 'second', true]]))
   })
 
   it('edits title and artist together with song settings', async () => {
     vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
     renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '设置 World is Mine' }))
+    expect(screen.queryByRole('button', { name: '移入回收站' })).toBeNull()
     fireEvent.change(screen.getByLabelText('歌曲名称'), { target: { value: '新名称' } })
     fireEvent.change(screen.getByLabelText('歌手'), { target: { value: '新歌手' } })
     fireEvent.click(screen.getByText('保存'))
