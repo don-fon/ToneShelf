@@ -44,6 +44,48 @@ const renderApp = () => {
 afterEach(() => { cleanup(); usePlayer.setState(usePlayer.getInitialState(), true); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
+  it('plays by clicking the song row and resumes the current song without resetting progress', async () => {
+    vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    renderApp()
+    const row = await screen.findByRole('group', { name: '歌曲 World is Mine' })
+    expect(row.querySelector('button.play')).toBeNull()
+    fireEvent.click(within(row).getByText('World is Mine'))
+    expect(usePlayer.getState().trackID).toBe(track.id)
+    expect(usePlayer.getState().playing).toBe(true)
+    usePlayer.setState({ position: 42, playing: false })
+    fireEvent.click(row)
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(usePlayer.getState().position).toBe(42)
+    const recovery = usePlayer.getState().recovery
+    fireEvent.click(row)
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(usePlayer.getState().position).toBe(42)
+    expect(usePlayer.getState().recovery).toEqual(recovery)
+  })
+
+  it('keeps checkbox and settings interactions separate from row playback', async () => {
+    vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    renderApp()
+    const row = await screen.findByRole('group', { name: '歌曲 World is Mine' })
+    fireEvent.click(within(row).getByRole('checkbox'))
+    expect(usePlayer.getState().trackID).toBeNull()
+    fireEvent.keyDown(within(row).getByRole('checkbox'), { key: ' ' })
+    expect(usePlayer.getState().playing).toBe(false)
+    const settingsButton = within(row).getByRole('button', { name: '设置 World is Mine' })
+    fireEvent.click(settingsButton.querySelector('svg')!)
+    expect(screen.getByRole('dialog', { name: '歌曲设置' })).toBeTruthy()
+    expect(usePlayer.getState().playing).toBe(false)
+  })
+
+  it.each(['Enter', ' '])('plays the focused song row with %s', async (key) => {
+    vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    renderApp()
+    const row = await screen.findByRole('group', { name: '歌曲 World is Mine' })
+    fireEvent.keyDown(row, { key })
+    expect(usePlayer.getState().trackID).toBe(track.id)
+    expect(usePlayer.getState().playing).toBe(true)
+  })
+
   it('discards selected cover and audio files on cancel without uploading either', async () => {
     URL.createObjectURL = vi.fn(() => 'blob:preview'); URL.revokeObjectURL = vi.fn()
     vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
