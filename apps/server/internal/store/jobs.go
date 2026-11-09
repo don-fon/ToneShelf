@@ -45,6 +45,9 @@ type UploadJob struct {
 const usageSQL = `(SELECT COALESCE(SUM(size_bytes),0) FROM tracks)+(SELECT COALESCE(SUM(size_bytes),0) FROM pending_file_deletions)+(SELECT COALESCE(SUM(reserved_bytes),0) FROM upload_jobs)`
 
 func (s *Store) CreateJob(ctx context.Context, job UploadJob) error {
+	if err := s.paths(false, &job.SourcePath, &job.OutputPath); err != nil {
+		return err
+	}
 	if err := currentuser.Require(ctx); err != nil {
 		return err
 	}
@@ -92,6 +95,17 @@ func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
 			}
 			job.RequiresConfirmation = job.Kind != "preflight" || job.TargetTrackID != ""
 			job.ConflictTitle = job.Candidate.Title
+		}
+		if err = s.paths(true, &job.SourcePath, &job.OutputPath); err != nil {
+			return nil, err
+		}
+		if job.Candidate != nil {
+			var candidate NewTrack
+			candidate, err = s.newTrackPaths(*job.Candidate, true)
+			if err != nil {
+				return nil, err
+			}
+			job.Candidate = &candidate
 		}
 		out = append(out, job)
 	}
@@ -195,7 +209,7 @@ func (s *Store) Quota(ctx context.Context) (used, reserved int64, err error) {
 }
 
 func (s *Store) KnownMediaPaths(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT original_path FROM tracks UNION SELECT cover_path FROM tracks WHERE cover_path<>'' UNION SELECT playable_path FROM tracks UNION SELECT path FROM pending_file_deletions UNION SELECT source_path FROM upload_jobs UNION SELECT output_path FROM upload_jobs UNION SELECT output_path||'.stream' FROM upload_jobs UNION SELECT output_path||'.cover.jpg' FROM upload_jobs`)
+	rows, err := s.db.QueryContext(ctx, `SELECT original_path FROM tracks UNION SELECT cover_path FROM tracks WHERE cover_path<>'' UNION SELECT playable_path FROM tracks UNION SELECT path FROM pending_file_deletions UNION SELECT source_path FROM upload_jobs UNION SELECT output_path FROM upload_jobs UNION SELECT output_path||'.stream' FROM upload_jobs WHERE output_path<>'' UNION SELECT output_path||'.cover.jpg' FROM upload_jobs WHERE output_path<>''`)
 	if err != nil {
 		return nil, err
 	}
@@ -206,12 +220,24 @@ func (s *Store) KnownMediaPaths(ctx context.Context) (map[string]bool, error) {
 		if err = rows.Scan(&path); err != nil {
 			return nil, err
 		}
+		if path == "" {
+			continue
+		}
+		path, err = s.resolvedPath(path)
+		if err != nil {
+			return nil, err
+		}
 		known[path] = true
 	}
 	return known, rows.Err()
 }
 
 func (s *Store) QueueOrphan(ctx context.Context, path string, bytes int64) error {
+	var pathErr error
+	path, pathErr = s.storedPath(path)
+	if pathErr != nil {
+		return pathErr
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO pending_file_deletions(path,size_bytes,created_at) VALUES(?,?,?)`, path, bytes, nowText())
 	return err
 }
@@ -279,7 +305,11 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 			return Track{}, queryErr
 		}
 		if duplicate != "" {
-			candidate, marshalErr := json.Marshal(track)
+			storedCandidate, pathErr := s.newTrackPaths(track, false)
+			if pathErr != nil {
+				return Track{}, pathErr
+			}
+			candidate, marshalErr := json.Marshal(storedCandidate)
 			if marshalErr != nil {
 				return Track{}, marshalErr
 			}
@@ -292,7 +322,7 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 			}
 			return Track{}, ErrUploadConflict
 		}
-		err = insertTrackTx(ctx, tx, track)
+		err = s.insertTrackTx(ctx, tx, track)
 		if err == nil && playlistID != "" && playlistID != defaultPlaylistID {
 			var exists bool
 			err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_user_id=?)`, playlistID, currentuser.ID(ctx)).Scan(&exists)
@@ -302,7 +332,7 @@ func (s *Store) completeJob(ctx context.Context, job UploadJob, track NewTrack, 
 		}
 	} else {
 		id = job.TargetTrackID
-		err = replaceTrackTx(ctx, tx, id, track, oldFiles)
+		err = s.replaceTrackTx(ctx, tx, id, track, oldFiles)
 	}
 	if err != nil {
 		return Track{}, err

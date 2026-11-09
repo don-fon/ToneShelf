@@ -21,12 +21,19 @@ func (s *Store) MediaMaintenanceTracks(ctx context.Context) ([]Track, error) {
 		if err = rows.Scan(&track.ID, &track.OriginalPath, &track.PlayablePath, &track.DurationSeconds, &track.OriginalContentType, &track.PlaybackIndexVersion, &track.DurationProbeVersion, &track.AudioVersion); err != nil {
 			return nil, err
 		}
+		track, err = s.resolveTrack(track)
+		if err != nil {
+			return nil, err
+		}
 		tracks = append(tracks, track)
 	}
 	return tracks, rows.Err()
 }
 
 func (s *Store) SetOriginalProbe(ctx context.Context, track Track, mime string, duration float64) error {
+	if err := s.paths(false, &track.OriginalPath); err != nil {
+		return err
+	}
 	if err := currentuser.Require(ctx); err != nil {
 		return err
 	}
@@ -40,6 +47,9 @@ func (s *Store) SetOriginalProbe(ctx context.Context, track Track, mime string, 
 }
 
 func (s *Store) ScheduleIndexRepair(ctx context.Context, track Track, id, output string) error {
+	if err := s.paths(false, &track.PlayablePath, &output); err != nil {
+		return err
+	}
 	if err := currentuser.Require(ctx); err != nil {
 		return err
 	}
@@ -52,6 +62,9 @@ func (s *Store) ScheduleIndexRepair(ctx context.Context, track Track, id, output
 }
 
 func (s *Store) CompleteIndexRepair(ctx context.Context, job UploadJob, oldSize, newSize int64) error {
+	if err := s.paths(false, &job.SourcePath, &job.OutputPath); err != nil {
+		return err
+	}
 	if err := currentuser.Require(ctx); err != nil {
 		return err
 	}

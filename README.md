@@ -26,7 +26,40 @@ Linux / NAS：
 
 脚本会检查 Go、Node.js/npm 和 FFmpeg/ffprobe，随后自动安装前端依赖、构建网页并启动服务。如果 PowerShell 的脚本执行策略阻止运行，可以使用 `powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1`。
 
-随后访问 <http://127.0.0.1:8080>。默认数据目录是仓库根目录下的 `.data`，可用 `MUSIC_DATA_DIR`、`MUSIC_ADDR`、`MUSIC_WEB_DIR` 和 `MUSIC_LRCLIB_URL` 分别覆盖数据目录、监听地址、网页构建目录和歌词服务地址。部署到其他设备访问时，应显式设置监听地址，并在可信网络或反向代理后运行；身份验证尚未实现。
+随后访问 <http://127.0.0.1:8080>。开发启动脚本默认继续使用仓库根目录的 `.data`；提供 `--config`、`--data-dir`、`MUSIC_CONFIG` 或 `MUSIC_DATA_DIR` 时使用指定配置。服务端启动日志打印实际配置文件、数据目录、数据库和监听地址。部署到其他设备访问时，应显式设置监听地址，并在可信网络或反向代理后运行；身份验证尚未实现。
+
+## 配置与数据目录
+
+配置优先级为 **命令行 > 环境变量 > config.json > 平台默认值**。直接运行服务器时，Windows 默认使用 `%LOCALAPPDATA%/MusicPlayer/`，配置文件位于该目录的 `config.json`；Linux 默认读取 `/etc/music-player/config.json`，数据位于 `/var/lib/music-player/`。非系统安装可用 `--data-dir` 指向有写权限的用户目录。显式指定的配置文件不存在或格式无效时，启动会报错。
+
+可复制 [config.example.json](config.example.json) 为自己的配置文件：
+
+```powershell
+.\scripts\start.ps1 --config .\config.json
+# 也可以直接启动，命令行参数会覆盖配置文件和环境变量
+go run ./apps/server/cmd/music-player --config ./config.json --data-dir ./.data --addr 127.0.0.1:8080
+```
+
+```sh
+./scripts/start.sh --config ./config.json
+./music-player --data-dir /var/lib/music-player --web-dir ./web
+```
+
+| JSON 字段 | 环境变量 | 命令行参数 |
+| --- | --- | --- |
+| 配置文件选择 | `MUSIC_CONFIG` | `--config` |
+| `addr` | `MUSIC_ADDR` | `--addr` |
+| `dataDir` | `MUSIC_DATA_DIR` | `--data-dir` |
+| `database` | `MUSIC_DATABASE` | `--database` |
+| `webDir` | `MUSIC_WEB_DIR` | `--web-dir` |
+| `quotaBytes` | `MUSIC_QUOTA_BYTES` | `--quota-bytes` |
+| `ffmpeg` / `ffprobe` | `MUSIC_FFMPEG` / `MUSIC_FFPROBE` | `--ffmpeg` / `--ffprobe` |
+| `logLevel` | `MUSIC_LOG_LEVEL` | `--log-level` |
+| `lrclibUrl` | `MUSIC_LRCLIB_URL` | `--lrclib-url` |
+
+`database` 默认是 `data/music.db`，必须相对数据根目录，不能使用绝对路径或 `..` 越界。配置文件中的相对数据目录、网页目录和工具路径相对配置文件所在目录；环境变量和命令行中的相对路径相对启动工作目录。工具填 `ffmpeg` / `ffprobe` 这样的命令名时从 `PATH` 查找。空 `webDir` 自动查找可执行文件旁的 `web/` 和开发构建目录。日志等级支持 `debug`、`info`、`warn`、`error`，配额使用字节，默认 10 GiB。运行 `--help` 查看所有参数。
+
+数据库中的媒体、封面、任务候选及待清理文件使用相对数据根目录的路径。旧库会通过版本化迁移转换路径；请先在旧数据目录完成一次升级，再停服整体移动数据目录并修改 `dataDir`。无需手改数据库，不会自动搬迁或删除旧目录。SQLite 数据库须位于本机文件系统或本地容器卷，不能放在 SMB/NFS 上。
 
 开发网页时，可另开终端运行 `npm run dev`，Vite 会把 `/api` 请求转发到 Go 服务。
 

@@ -1,0 +1,11 @@
+{
+  "addr": "127.0.0.1:8080",
+  "dataDir": "./music-data",
+  "database": "data/music.db",
+  "webDir": "",
+  "quotaBytes": 10737418240,
+  "ffmpeg": "ffmpeg",
+  "ffprobe": "ffprobe",
+  "logLevel": "info",
+  "lrclibUrl": "https://lrclib.net"
+}

@@ -21,7 +21,10 @@ const (
 
 var ErrConfirmationRequired = errors.New("confirmation required")
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db   *sql.DB
+	root string
+}
 
 type Track struct {
 	CoverURL             string   `json:"coverUrl,omitempty"`
@@ -80,7 +83,7 @@ type PendingFile struct {
 	SizeBytes       int64
 }
 
-func Open(ctx context.Context, path string) (*Store, error) {
+func Open(ctx context.Context, path string, options ...Option) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -93,7 +96,13 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		}
 	}
 	s := &Store{db: db}
-	if err = s.migrate(); err != nil {
+	for _, option := range options {
+		if err = option(s); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	if err = s.migrate(context.WithValue(ctx, migrationRootKey{}, s.root)); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -104,7 +113,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) migrate() error {
+func (s *Store) migrate(ctx context.Context) error {
 	sub, err := fs.Sub(migrations, "migrations")
 	if err != nil {
 		return err
@@ -113,7 +122,7 @@ func (s *Store) migrate() error {
 	if err = goose.SetDialect("sqlite3"); err != nil {
 		return err
 	}
-	return goose.Up(s.db, ".")
+	return goose.UpContext(ctx, s.db, ".")
 }
 
 func (s *Store) seed(ctx context.Context) error {
@@ -193,6 +202,10 @@ func (s *Store) tracksForPlaylist(ctx context.Context, playlistID string) ([]Tra
 		if t.OriginalContentType != "audio/aac" {
 			t.OriginalAudioURL = fmt.Sprintf("/api/tracks/%s/audio?source=original&v=%d", t.ID, t.AudioVersion)
 		}
+		t, err = s.resolveTrack(t)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -215,7 +228,10 @@ func (s *Store) Track(ctx context.Context, id string) (Track, error) {
 	if t.OriginalContentType != "audio/aac" {
 		t.OriginalAudioURL = fmt.Sprintf("/api/tracks/%s/audio?source=original&v=%d", t.ID, t.AudioVersion)
 	}
-	return t, err
+	if err != nil {
+		return t, err
+	}
+	return s.resolveTrack(t)
 }
 
 func (s *Store) InsertTrack(ctx context.Context, n NewTrack) (Track, error) {
@@ -227,7 +243,7 @@ func (s *Store) InsertTrack(ctx context.Context, n NewTrack) (Track, error) {
 		return Track{}, err
 	}
 	defer tx.Rollback()
-	if err = insertTrackTx(ctx, tx, n); err != nil {
+	if err = s.insertTrackTx(ctx, tx, n); err != nil {
 		return Track{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -236,7 +252,12 @@ func (s *Store) InsertTrack(ctx context.Context, n NewTrack) (Track, error) {
 	return s.Track(ctx, n.ID)
 }
 
-func insertTrackTx(ctx context.Context, tx *sql.Tx, n NewTrack) error {
+func (s *Store) insertTrackTx(ctx context.Context, tx *sql.Tx, n NewTrack) error {
+	var pathErr error
+	n, pathErr = s.newTrackPaths(n, false)
+	if pathErr != nil {
+		return pathErr
+	}
 	if err := currentuser.Require(ctx); err != nil {
 		return err
 	}
@@ -493,7 +514,7 @@ func (s *Store) Trash(ctx context.Context) ([]Track, error) {
 	defer rows.Close()
 	out := make([]Track, 0)
 	for rows.Next() {
-		track, scanErr := scanTrashTrack(rows)
+		track, scanErr := s.scanTrashTrack(rows)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -543,7 +564,7 @@ func (s *Store) ReplaceTrack(ctx context.Context, id string, replacement NewTrac
 		return Track{}, err
 	}
 	defer tx.Rollback()
-	if err = replaceTrackTx(ctx, tx, id, replacement, oldFiles); err != nil {
+	if err = s.replaceTrackTx(ctx, tx, id, replacement, oldFiles); err != nil {
 		return Track{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -552,7 +573,16 @@ func (s *Store) ReplaceTrack(ctx context.Context, id string, replacement NewTrac
 	return s.Track(ctx, id)
 }
 
-func replaceTrackTx(ctx context.Context, tx *sql.Tx, id string, replacement NewTrack, oldFiles []PendingFile) error {
+func (s *Store) replaceTrackTx(ctx context.Context, tx *sql.Tx, id string, replacement NewTrack, oldFiles []PendingFile) error {
+	var pathErr error
+	replacement, pathErr = s.newTrackPaths(replacement, false)
+	if pathErr != nil {
+		return pathErr
+	}
+	oldFiles, pathErr = s.filePaths(oldFiles)
+	if pathErr != nil {
+		return pathErr
+	}
 	if err := currentuser.Require(ctx); err != nil {
 		return err
 	}
@@ -605,17 +635,31 @@ func (s *Store) PendingFiles(ctx context.Context) ([]PendingFile, error) {
 		if err = rows.Scan(&file.Path, &file.SizeBytes, &file.LastError); err != nil {
 			return nil, err
 		}
+		file.Path, err = s.resolvedPath(file.Path)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, file)
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) CompletePendingFile(ctx context.Context, path string) error {
+	var pathErr error
+	path, pathErr = s.storedPath(path)
+	if pathErr != nil {
+		return pathErr
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM pending_file_deletions WHERE path=?`, path)
 	return err
 }
 
 func (s *Store) FailPendingFile(ctx context.Context, path string, failure error) error {
+	var pathErr error
+	path, pathErr = s.storedPath(path)
+	if pathErr != nil {
+		return pathErr
+	}
 	_, err := s.db.ExecContext(ctx, `UPDATE pending_file_deletions SET last_error=? WHERE path=?`, failure.Error(), path)
 	return err
 }
@@ -631,7 +675,7 @@ func (s *Store) PurgeCandidates(ctx context.Context, now time.Time) ([]Track, er
 	defer rows.Close()
 	var out []Track
 	for rows.Next() {
-		track, scanErr := scanTrashTrack(rows)
+		track, scanErr := s.scanTrashTrack(rows)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -717,7 +761,7 @@ func compactPlaylistTx(ctx context.Context, tx *sql.Tx, playlistID string) error
 
 type scanner interface{ Scan(...any) error }
 
-func scanTrashTrack(row scanner) (Track, error) {
+func (s *Store) scanTrashTrack(row scanner) (Track, error) {
 	var track Track
 	var end sql.NullFloat64
 	var deleted, eligible sql.NullString
@@ -731,7 +775,10 @@ func scanTrashTrack(row scanner) (Track, error) {
 	if eligible.Valid {
 		track.PurgeEligibleAt = &eligible.String
 	}
-	return track, err
+	if err != nil {
+		return track, err
+	}
+	return s.resolveTrack(track)
 }
 
 func requireOne(result sql.Result, err error) error {

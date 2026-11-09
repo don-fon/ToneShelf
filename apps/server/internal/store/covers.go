@@ -20,12 +20,19 @@ func (s *Store) CoverMaintenanceTracks(ctx context.Context) ([]Track, error) {
 		if err = rows.Scan(&t.ID, &t.OriginalPath); err != nil {
 			return nil, err
 		}
+		t, err = s.resolveTrack(t)
+		if err != nil {
+			return nil, err
+		}
 		tracks = append(tracks, t)
 	}
 	return tracks, rows.Err()
 }
 
 func (s *Store) ScheduleCover(ctx context.Context, track Track, id, output string) error {
+	if err := s.paths(false, &track.OriginalPath, &output); err != nil {
+		return err
+	}
 	if err := currentuser.Require(ctx); err != nil {
 		return err
 	}
@@ -37,6 +44,9 @@ func (s *Store) ScheduleCover(ctx context.Context, track Track, id, output strin
 }
 
 func (s *Store) CompleteCover(ctx context.Context, job UploadJob, path string, size int64) error {
+	if err := s.paths(false, &job.SourcePath, &path); err != nil {
+		return err
+	}
 	if err := currentuser.Require(ctx); err != nil {
 		return err
 	}
