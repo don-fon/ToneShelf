@@ -107,6 +107,9 @@ func (a *API) recoverUserJobs(ctx context.Context) error {
 			a.cleanFailedJob(ctx, job)
 		case "processing":
 			if job.Kind == "repair" || job.Kind == "cover" {
+				if err = removeCandidate(job.OutputPath + ".download"); err != nil {
+					return err
+				}
 				if err = removeCandidate(job.OutputPath); err != nil {
 					if stateErr := a.Store.SetJobState(ctx, job.ID, "processing", "failed", err.Error()); stateErr != nil {
 						return stateErr
@@ -213,6 +216,10 @@ func canonicalPath(path string) string {
 
 func (a *API) processJob(ctx context.Context, job store.UploadJob) {
 	if job.Kind == "cover" {
+		if job.CoverReleaseID != "" {
+			a.processOnlineCover(ctx, job)
+			return
+		}
 		a.processCover(ctx, job)
 		return
 	}
@@ -251,7 +258,7 @@ func (a *API) processJob(ctx context.Context, job store.UploadJob) {
 }
 
 func (a *API) cleanFailedJob(ctx context.Context, job store.UploadJob) {
-	paths := []string{job.OutputPath, job.OutputPath + ".stream", job.OutputPath + ".cover.jpg"}
+	paths := []string{job.OutputPath + ".download", job.OutputPath, job.OutputPath + ".stream", job.OutputPath + ".cover.jpg"}
 	if job.Kind != "repair" && job.Kind != "cover" {
 		paths = append(paths, job.SourcePath)
 	}

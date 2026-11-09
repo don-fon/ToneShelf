@@ -30,11 +30,11 @@ func TestRelativePathsMigrateAndSurviveDataRootMove(t *testing.T) {
 	}
 	mediaPath := func(name string) string { return filepath.Join(oldRoot, "media", name) }
 	n := NewTrack{ID: "song", Title: "song", OriginalPath: mediaPath("originals/song.flac"), PlayablePath: mediaPath("playable/song.mp3"), CoverPath: mediaPath("playable/song.jpg"), SizeBytes: 30, DurationSeconds: 10}
-	if _, err = s.InsertTrack(ctx, n); err != nil {
+	if _, err = insertV11Track(s, n); err != nil {
 		t.Fatal(err)
 	}
 	job := UploadJob{ID: "upload", FileName: "candidate.flac", TargetTrackID: n.ID, SourcePath: mediaPath("staging/upload.flac"), OutputPath: mediaPath("playable/upload.mp3")}
-	if err = s.CreateJob(ctx, job); err != nil {
+	if err = createV11Job(s, job); err != nil {
 		t.Fatal(err)
 	}
 	candidate, _ := json.Marshal(NewTrack{ID: job.ID, OriginalPath: job.SourcePath, PlayablePath: job.OutputPath, CoverPath: job.OutputPath + ".cover.jpg", DurationSeconds: 10})
@@ -122,7 +122,7 @@ func TestRelativePathMigrationRollsBackOnInvalidLegacyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	outside := filepath.Join(filepath.Dir(root), "outside.mp3")
-	if _, err = s.InsertTrack(ctx, NewTrack{ID: "invalid", OriginalPath: outside, PlayablePath: outside, DurationSeconds: 1}); err != nil {
+	if _, err = insertV11Track(s, NewTrack{ID: "invalid", OriginalPath: outside, PlayablePath: outside, DurationSeconds: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
@@ -162,7 +162,7 @@ func TestLegacyWorkingDirectoryPrefixAndWindowsSeparators(t *testing.T) {
 	if err = goose.DownTo(s.db, ".", 11); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.InsertTrack(ctx, NewTrack{ID: "legacy", OriginalPath: `legacy-library\media\originals\song.mp3`, PlayablePath: "legacy-library/media/originals/song.mp3", DurationSeconds: 1}); err != nil {
+	if _, err = insertV11Track(s, NewTrack{ID: "legacy", OriginalPath: `legacy-library\media\originals\song.mp3`, PlayablePath: "legacy-library/media/originals/song.mp3", DurationSeconds: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
@@ -176,4 +176,15 @@ func TestLegacyWorkingDirectoryPrefixAndWindowsSeparators(t *testing.T) {
 	if err != nil || track.OriginalPath != filepath.Join(root, "media", "originals", "song.mp3") || track.PlayablePath != track.OriginalPath {
 		t.Fatalf("legacy prefix=%+v %v", track, err)
 	}
+}
+func insertV11Track(s *Store, n NewTrack) (Track, error) {
+	_, err := s.db.Exec(`INSERT INTO tracks(id,owner_user_id,title,original_path,playable_path,cover_path,size_bytes,duration_seconds,created_at,updated_at)VALUES(?,?,?,?,?,?,?,?,?,?)`, n.ID, DefaultUserID, n.Title, n.OriginalPath, n.PlayablePath, n.CoverPath, n.SizeBytes, n.DurationSeconds, nowText(), nowText())
+	if err == nil {
+		_, err = s.db.Exec(`INSERT INTO playlist_items(id,playlist_id,track_id,position,created_at)VALUES(?,?,?,0,?)`, n.ID+"-fixture", DefaultPlaylistID, n.ID, nowText())
+	}
+	return Track{}, err
+}
+func createV11Job(s *Store, j UploadJob) error {
+	_, err := s.db.Exec(`INSERT INTO upload_jobs(id,owner_user_id,file_name,target_track_id,source_path,output_path,state,created_at,updated_at)VALUES(?,?,?,?,?,?,'receiving',?,?)`, j.ID, DefaultUserID, j.FileName, j.TargetTrackID, j.SourcePath, j.OutputPath, nowText(), nowText())
+	return err
 }

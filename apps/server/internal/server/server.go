@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"music-player/server/internal/artwork"
 	"music-player/server/internal/lyrics"
 	"music-player/server/internal/media"
 	"music-player/server/internal/store"
@@ -25,6 +26,7 @@ import (
 const QuotaBytes int64 = 10 * 1024 * 1024 * 1024
 
 type API struct {
+	Artwork     *artwork.Client
 	Store       *store.Store
 	Media       *media.Processor
 	Lyrics      *lyrics.Client
@@ -63,6 +65,9 @@ func (a *API) Handler() http.Handler {
 	r.Get("/api/tracks/{trackID}/lyrics/search", a.searchLyrics)
 	r.Get("/api/tracks/{trackID}/audio", a.audio)
 	r.Get("/api/tracks/{trackID}/cover", a.cover)
+	r.Post("/api/tracks/{trackID}/cover/search", a.searchCovers)
+	r.Get("/api/tracks/{trackID}/cover/candidates/{releaseID}", a.previewCover)
+	r.Post("/api/tracks/{trackID}/cover", a.selectCover)
 	r.Get("/api/quota", a.quota)
 	if a.WebDir != "" {
 		r.Handle("/*", spaHandler(a.WebDir))

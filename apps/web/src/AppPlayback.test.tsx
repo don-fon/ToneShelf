@@ -60,6 +60,17 @@ async function setup(playing = true) {
 }
 
 describe('independent playback controls', () => {
+  it('updates artwork without seeking, pausing or reloading audio', async () => {
+    const query = await setup()
+    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, coverUrl: '/api/tracks/song/cover?v=1&c=2' }] }]) })
+    await waitFor(() => expect(document.querySelector('.now img')?.getAttribute('src')).toBe('/api/tracks/song/cover?v=1&c=2'))
+    expect(audio.seek).not.toHaveBeenCalled()
+    expect(audio.load).not.toHaveBeenCalled()
+    expect(audio.pause).not.toHaveBeenCalled()
+    expect(audio.play).not.toHaveBeenCalled()
+    expect(audio.element!.currentTime).toBe(48.8)
+  })
+
   it('waits for the library before validating restored playback and pauses if autoplay is blocked', async () => {
     let resolve!: (value: Awaited<ReturnType<typeof api.playlists>>) => void
     vi.mocked(api.playlists).mockReturnValueOnce(new Promise((done) => { resolve = done }))

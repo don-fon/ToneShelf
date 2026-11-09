@@ -22,6 +22,7 @@ func (s *Store) DeleteCancelledJob(ctx context.Context, id string) error {
 }
 
 type UploadJob struct {
+	CoverReleaseID       string    `json:"-"`
 	ID                   string    `json:"id"`
 	Kind                 string    `json:"kind"`
 	PlaylistID           string    `json:"playlistId,omitempty"`
@@ -68,7 +69,7 @@ func (s *Store) CreateJob(ctx context.Context, job UploadJob) error {
 	if job.Kind == "" {
 		job.Kind = "upload"
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO upload_jobs(id,owner_user_id,file_name,request_key,target_track_id,source_path,output_path,state,created_at,updated_at,kind,playlist_id) VALUES(?,?,?,?,?,?,?,'receiving',?,?,?,?)`, job.ID, currentuser.ID(ctx), job.FileName, job.RequestKey, job.TargetTrackID, job.SourcePath, job.OutputPath, nowText(), nowText(), job.Kind, job.PlaylistID)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO upload_jobs(id,owner_user_id,file_name,request_key,target_track_id,source_path,output_path,state,created_at,updated_at,kind,playlist_id,cover_release_id) VALUES(?,?,?,?,?,?,?,'receiving',?,?,?,?,?)`, job.ID, currentuser.ID(ctx), job.FileName, job.RequestKey, job.TargetTrackID, job.SourcePath, job.OutputPath, nowText(), nowText(), job.Kind, job.PlaylistID, job.CoverReleaseID)
 	return err
 }
 
@@ -76,7 +77,7 @@ func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
 	if err := currentuser.Require(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,kind,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at,pending_candidate,playlist_id FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, currentuser.ID(ctx))
+	rows, err := s.db.QueryContext(ctx, `SELECT id,kind,file_name,request_key,target_track_id,track_id,source_path,output_path,state,reserved_bytes,error,created_at,pending_candidate,playlist_id,cover_release_id FROM upload_jobs WHERE owner_user_id=? ORDER BY created_at DESC,id`, currentuser.ID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +86,7 @@ func (s *Store) Jobs(ctx context.Context) ([]UploadJob, error) {
 	for rows.Next() {
 		var job UploadJob
 		var pending string
-		if err = rows.Scan(&job.ID, &job.Kind, &job.FileName, &job.RequestKey, &job.TargetTrackID, &job.TrackID, &job.SourcePath, &job.OutputPath, &job.State, &job.ReservedBytes, &job.Error, &job.CreatedAt, &pending, &job.PlaylistID); err != nil {
+		if err = rows.Scan(&job.ID, &job.Kind, &job.FileName, &job.RequestKey, &job.TargetTrackID, &job.TrackID, &job.SourcePath, &job.OutputPath, &job.State, &job.ReservedBytes, &job.Error, &job.CreatedAt, &pending, &job.PlaylistID, &job.CoverReleaseID); err != nil {
 			return nil, err
 		}
 		if pending != "" && job.State == "queued" {
@@ -209,7 +210,7 @@ func (s *Store) Quota(ctx context.Context) (used, reserved int64, err error) {
 }
 
 func (s *Store) KnownMediaPaths(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT original_path FROM tracks UNION SELECT cover_path FROM tracks WHERE cover_path<>'' UNION SELECT playable_path FROM tracks UNION SELECT path FROM pending_file_deletions UNION SELECT source_path FROM upload_jobs UNION SELECT output_path FROM upload_jobs UNION SELECT output_path||'.stream' FROM upload_jobs WHERE output_path<>'' UNION SELECT output_path||'.cover.jpg' FROM upload_jobs WHERE output_path<>''`)
+	rows, err := s.db.QueryContext(ctx, `SELECT original_path FROM tracks UNION SELECT cover_path FROM tracks WHERE cover_path<>'' UNION SELECT playable_path FROM tracks UNION SELECT path FROM pending_file_deletions UNION SELECT source_path FROM upload_jobs UNION SELECT output_path FROM upload_jobs UNION SELECT output_path||'.download' FROM upload_jobs WHERE output_path<>'' UNION SELECT output_path||'.stream' FROM upload_jobs WHERE output_path<>'' UNION SELECT output_path||'.cover.jpg' FROM upload_jobs WHERE output_path<>''`)
 	if err != nil {
 		return nil, err
 	}

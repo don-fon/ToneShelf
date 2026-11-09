@@ -1,4 +1,4 @@
-import type { CurrentUser, LyricsSearchResult, Playlist, Quota, Track, UploadJob } from '@music/domain'
+import type { CoverSearchInput, CoverSearchResult, CurrentUser, LyricsSearchResult, Playlist, Quota, Track, UploadJob } from '@music/domain'
 
 import { uploadFile } from './platform/upload'
 import { createUploadKey } from './platform/upload-session'
@@ -44,6 +44,8 @@ export const api = {
       lyricsPrimaryLine: track.lyricsPrimaryLine,
     }),
   }),
+  searchCovers: (trackID: string, input: CoverSearchInput) => request<CoverSearchResult>(`/api/tracks/${trackID}/cover/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }),
+  selectCover: (trackID: string, releaseId: string) => request<UploadJob>(`/api/tracks/${trackID}/cover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ releaseId }) }),
   searchLyrics: (trackID: string) => request<LyricsSearchResult>(`/api/tracks/${trackID}/lyrics/search`),
   createPlaylist: (name: string) => request<Playlist>('/api/playlists', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),

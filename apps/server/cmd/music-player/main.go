@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"music-player/server/internal/artwork"
 	"music-player/server/internal/config"
 	"music-player/server/internal/lyrics"
 	"music-player/server/internal/media"
@@ -56,7 +57,7 @@ func main() {
 	lyricsClient := lyrics.New(cfg.LRCLIBURL)
 	processor := media.New(root)
 	processor.FFmpeg, processor.FFprobe = cfg.FFmpeg, cfg.FFprobe
-	api := &appserver.API{Store: s, Media: processor, Lyrics: lyricsClient, Log: log, WebDir: webDir, QuotaLimit: cfg.QuotaBytes}
+	api := &appserver.API{Artwork: artwork.New(), Store: s, Media: processor, Lyrics: lyricsClient, Log: log, WebDir: webDir, QuotaLimit: cfg.QuotaBytes}
 	if err = api.RecoverJobs(ctx); err != nil {
 		log.Error("recover upload jobs", "error", err)
 		return

@@ -58,7 +58,7 @@ func TestLegacyCoverBackfillRestartQuotaAndReplacementRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.Track(ctx, track.ID)
-	if err != nil || got.SizeBytes != 15 || got.CoverURL != "/api/tracks/song/cover?v=1" || got.AudioVersion != track.AudioVersion {
+	if err != nil || got.SizeBytes != 15 || got.CoverURL != "/api/tracks/song/cover?v=1&c=1" || got.AudioVersion != track.AudioVersion {
 		t.Fatalf("backfill=%+v %v", got, err)
 	}
 	used, reserved, err := s.Quota(ctx)
