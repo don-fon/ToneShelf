@@ -40,6 +40,7 @@ export function App() {
   const [showSort, setShowSort] = useState(false)
   const [selectedTrackIDs, setSelectedTrackIDs] = useState<string[]>([])
   const [showAddTo, setShowAddTo] = useState(false)
+  const [transferMode, setTransferMode] = useState<'add' | 'move'>('add')
   const [addingTo, setAddingTo] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const selectionBusy = addingTo !== null || deleting
@@ -59,21 +60,22 @@ export function App() {
   const addTo = async (playlistID: string) => {
     const target = playlists.find((playlist) => playlist.id === playlistID)
     if (!target || selectionBusy) return
-    const missing = selectedTracks.filter((track) => !target.tracks.some((item) => item.id === track.id))
+    const missing = transferMode === 'move' ? selectedTracks : selectedTracks.filter((track) => !target.tracks.some((item) => item.id === track.id))
     if (!missing.length) return
+    const verb = transferMode === 'move' ? '移动' : '添加'
     setAddingTo(playlistID); setTransferError(''); setTransferMessage('')
     try {
-      const results = await Promise.allSettled(missing.map((track) => api.addTrack(playlistID, track.id)))
+      const results = await Promise.allSettled(missing.map((track) => transferMode === 'move' ? api.moveTrack(active!.id, playlistID, track.id) : api.addTrack(playlistID, track.id)))
       const failed = missing.filter((_, index) => results[index].status === 'rejected')
       await refresh()
       if (failed.length) {
         setSelectedTrackIDs(failed.map((track) => track.id))
-        setTransferError(`已添加 ${missing.length - failed.length} 首，${failed.length} 首失败，请重试。`)
+        setTransferError(`已${verb} ${missing.length - failed.length} 首，${failed.length} 首失败，请重试。`)
       } else {
         setSelectedTrackIDs([]); setShowAddTo(false)
-        setTransferMessage(`已添加 ${missing.length} 首到“${target.name}”`)
+        setTransferMessage(`已${verb} ${missing.length} 首到“${target.name}”`)
       }
-    } catch (reason) { setTransferError(reason instanceof Error ? reason.message : '添加失败，请重试') }
+    } catch (reason) { setTransferError(reason instanceof Error ? reason.message : `${verb}失败，请重试`) }
     finally { setAddingTo(null) }
   }
 
@@ -185,7 +187,7 @@ export function App() {
       <div className="music-workspace" data-view={mobileView}>
       <div className="library-pane">
       <section className="hero"><div><small>当前歌单</small><div className="playlist-title"><h1>{active?.name ?? '默认歌单'}</h1><span className="track-count">{active?.tracks.length ?? 0} 首音乐</span></div>{active && !active.isDefault && <span className="playlist-actions"><button onClick={async () => { const name = window.prompt('歌单名称', active.name)?.trim(); if (name) { try { await api.renamePlaylist(active.id, name); await refresh() } catch (reason) { report(reason) } } }}>重命名</button><button onClick={async () => { if (!window.confirm(`删除歌单“${active.name}”？歌曲本身不会被删除。`)) return; try { await api.deletePlaylist(active.id); player.selectPlaylist(playlists.find((playlist) => playlist.isDefault)?.id ?? ''); await refresh() } catch (reason) { report(reason) } }}>删除歌单</button></span>}</div><label className="upload" htmlFor="music-upload">上传音乐</label></section>
-      <div className="playlist-transfer"><button type="button" disabled={!selectedTracks.length || selectionBusy} onClick={() => { setTransferError(''); setShowAddTo(true) }}>添加到</button><button className="delete-selected" type="button" disabled={!selectedTracks.length || selectionBusy} onClick={() => void removeSelected()}>{deleting ? '正在删除…' : '删除'}</button>{selectedTracks.length > 0 && <span>已选 {selectedTracks.length} 首</span>}{transferMessage && <span role="status">{transferMessage}</span>}</div>
+      <div className="playlist-transfer"><button type="button" disabled={!selectedTracks.length || selectionBusy} onClick={() => { setTransferMode('add'); setTransferError(''); setShowAddTo(true) }}>添加到</button><button type="button" disabled={!selectedTracks.length || selectionBusy} onClick={() => { setTransferMode('move'); setTransferError(''); setShowAddTo(true) }}>移动到</button><button className="delete-selected" type="button" disabled={!selectedTracks.length || selectionBusy} onClick={() => void removeSelected()}>{deleting ? '正在删除…' : '删除'}</button>{selectedTracks.length > 0 && <span>已选 {selectedTracks.length} 首</span>}{transferMessage && <span role="status">{transferMessage}</span>}</div>
       {!showAddTo && transferError && <p className="selection-error error" role="alert">{transferError}</p>}
       <div className="list-scroll" role="region" aria-label="歌曲列表" tabIndex={0}>
       <section className="tracks"><div className="track heading"><input type="checkbox" aria-label="全选歌曲" disabled={!visibleTracks.length || selectionBusy} checked={visibleTracks.length > 0 && selectedTracks.length === visibleTracks.length} ref={(input) => { if (input) input.indeterminate = selectedTracks.length > 0 && selectedTracks.length < visibleTracks.length }} onChange={(event) => setSelectedTrackIDs(event.target.checked ? visibleTracks.map((track) => track.id) : [])}/><span>歌曲</span><span>时长</span><div className="sort-tools" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowSort(false) }} onKeyDown={(event) => { if (event.key === 'Escape') { setShowSort(false); event.currentTarget.querySelector('button')?.focus() } }}>
@@ -200,9 +202,9 @@ export function App() {
       </div>
     </>}</main>
 
-    {showAddTo && <div className="modal"><form className="add-to-dialog" role="dialog" aria-modal="true" aria-labelledby="add-to-title" onSubmit={(event) => event.preventDefault()} onKeyDown={(event) => { if (event.key === 'Escape' && !addingTo) setShowAddTo(false) }}><h2 id="add-to-title">添加到歌单</h2><p>已选择 {selectedTracks.length} 首歌曲</p><div className="add-to-targets">{playlists.filter((playlist) => playlist.id !== active?.id).map((playlist) => {
+    {showAddTo && <div className="modal"><form className="add-to-dialog" role="dialog" aria-modal="true" aria-labelledby="add-to-title" onSubmit={(event) => event.preventDefault()} onKeyDown={(event) => { if (event.key === 'Escape' && !addingTo) setShowAddTo(false) }}><h2 id="add-to-title">{transferMode === 'move' ? '移动到歌单' : '添加到歌单'}</h2><p>已选择 {selectedTracks.length} 首歌曲</p><div className="add-to-targets">{playlists.filter((playlist) => playlist.id !== active?.id).map((playlist) => {
       const missing = selectedTracks.filter((track) => !playlist.tracks.some((item) => item.id === track.id)).length
-      return <button type="button" key={playlist.id} disabled={addingTo !== null || !missing} onClick={() => void addTo(playlist.id)}><span>{playlist.name}</span><small>{addingTo === playlist.id ? '正在添加…' : missing ? `添加 ${missing} 首` : '已全部包含'}</small></button>
+      return <button type="button" key={playlist.id} disabled={selectionBusy || !selectedTracks.length || (transferMode === 'add' && !missing)} onClick={() => void addTo(playlist.id)}><span>{playlist.name}</span><small>{addingTo === playlist.id ? '正在处理…' : transferMode === 'move' ? `移动 ${selectedTracks.length} 首` : missing ? `添加 ${missing} 首` : '已全部包含'}</small></button>
     })}{playlists.filter((playlist) => playlist.id !== active?.id).length === 0 && <p className="add-to-empty">请先在侧栏创建另一个歌单。</p>}</div>{transferError && <p className="error" role="alert">{transferError}</p>}<div className="add-to-actions"><button type="button" disabled={addingTo !== null} onClick={() => setShowAddTo(false)}>取消</button></div></form></div>}
 
     {editing && <div className="modal"><form className="song-settings" role="dialog" aria-modal="true" aria-labelledby="song-settings-title" onSubmit={(event) => { event.preventDefault(); save.mutate(editing) }}>

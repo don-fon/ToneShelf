@@ -24,6 +24,7 @@ vi.mock('./api', () => ({ api: {
   updateTrack: vi.fn().mockResolvedValue({}),
   restoreTrack: vi.fn().mockResolvedValue({}),
   addTrack: vi.fn().mockResolvedValue(undefined),
+  moveTrack: vi.fn().mockResolvedValue(undefined),
 } }))
 
 vi.mock('./player-store', () => ({ usePlayer: () => ({
@@ -41,9 +42,47 @@ const renderApp = () => {
   return render(<QueryClientProvider client={client}><App /></QueryClientProvider>)
 }
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
+  it('moves selected songs even when the destination already includes them', async () => {
+    const second = { ...track, id: 'second', title: 'Second' }
+    vi.mocked(api.playlists).mockResolvedValueOnce([
+      { id: 'default', name: '默认歌单', isDefault: true, tracks: [track, second] },
+      { id: 'target', name: '目标歌单', isDefault: false, tracks: [track, second] },
+    ])
+    renderApp()
+    const move = await screen.findByRole('button', { name: '移动到' })
+    expect((move as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText('全选歌曲'))
+    fireEvent.click(move)
+    const dialog = screen.getByRole('dialog', { name: '移动到歌单' })
+    const target = within(dialog).getByRole('button', { name: /目标歌单/ }) as HTMLButtonElement
+    expect(target.disabled).toBe(false)
+    fireEvent.click(target)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(vi.mocked(api.moveTrack).mock.calls).toEqual([['default', 'target', track.id], ['default', 'target', 'second']])
+    expect(api.addTrack).not.toHaveBeenCalled()
+    expect(api.removeTrack).not.toHaveBeenCalled()
+    expect(screen.getByRole('status').textContent).toContain('已移动 2 首')
+  })
+
+  it('keeps only failed moves selected and retries through the atomic move endpoint', async () => {
+    const second = { ...track, id: 'second', title: 'Second' }
+    const target = { id: 'target', name: '目标歌单', isDefault: false, tracks: [] as Track[] }
+    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track, second] }, target]).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [second] }, { ...target, tracks: [track] }])
+    vi.mocked(api.moveTrack).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('move failed'))
+    renderApp()
+    fireEvent.click(await screen.findByLabelText('全选歌曲'))
+    fireEvent.click(screen.getByRole('button', { name: '移动到' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /目标歌单/ }))
+    expect((await screen.findByRole('alert')).textContent).toContain('已移动 1 首，1 首失败')
+    expect((screen.getByLabelText('选择 Second') as HTMLInputElement).checked).toBe(true)
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /目标歌单/ }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(vi.mocked(api.moveTrack).mock.calls).toEqual([['default', 'target', track.id], ['default', 'target', 'second'], ['default', 'target', 'second']])
+  })
+
   it('adds selected songs to another playlist and skips songs already present', async () => {
     const second = { ...track, id: 'second', title: 'Second' }
     vi.mocked(api.playlists).mockResolvedValueOnce([

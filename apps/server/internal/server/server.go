@@ -48,6 +48,7 @@ func (a *API) Handler() http.Handler {
 	r.Patch("/api/playlists/{playlistID}", a.renamePlaylist)
 	r.Delete("/api/playlists/{playlistID}", a.deletePlaylist)
 	r.Post("/api/playlists/{playlistID}/tracks/{trackID}", a.addTrack)
+	r.Post("/api/playlists/{playlistID}/tracks/{trackID}/move", a.moveTrack)
 	r.Delete("/api/playlists/{playlistID}/tracks/{trackID}", a.removeTrack)
 	r.Get("/api/jobs", a.jobs)
 	r.Post("/api/jobs/{jobID}/resolve", a.resolveUpload)
@@ -65,6 +66,26 @@ func (a *API) Handler() http.Handler {
 		r.Handle("/*", spaHandler(a.WebDir))
 	}
 	return r
+}
+
+func (a *API) moveTrack(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TargetPlaylistID string `json:"targetPlaylistId"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	id, err := newID()
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	if err = a.Store.MoveTrack(r.Context(), chi.URLParam(r, "playlistID"), in.TargetPlaylistID, chi.URLParam(r, "trackID"), id); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) renamePlaylist(w http.ResponseWriter, r *http.Request) {

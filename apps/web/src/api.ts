@@ -52,6 +52,9 @@ export const api = {
   }),
   deletePlaylist: (playlistID: string) => request<void>(`/api/playlists/${playlistID}`, { method: 'DELETE' }),
   addTrack: (playlistID: string, trackID: string) => request<void>(`/api/playlists/${playlistID}/tracks/${trackID}`, { method: 'POST' }),
+  moveTrack: (sourceID: string, targetID: string, trackID: string) => request<void>(`/api/playlists/${sourceID}/tracks/${trackID}/move`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetPlaylistId: targetID }),
+  }),
   removeTrack: (playlistID: string, trackID: string, confirmDelete = false) => request<{ trackDeleted: boolean }>(`/api/playlists/${playlistID}/tracks/${trackID}?confirmDelete=${confirmDelete}`, { method: 'DELETE' }),
   deleteTrack: (trackID: string) => request<void>(`/api/tracks/${trackID}`, { method: 'DELETE' }),
   trash: async () => (await request<Track[] | null>('/api/trash')) ?? [],
