@@ -30,3 +30,8 @@ func (a *API) withCurrentUser(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+func (a *API) currentUser(w http.ResponseWriter, r *http.Request) {
+	id := currentuser.ID(r.Context())
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "isDefault": id == store.DefaultUserID})
+}

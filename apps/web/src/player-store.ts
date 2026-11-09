@@ -1,32 +1,48 @@
-import type { PlaybackMode } from '@music/domain'
-import type { RecoveryState } from '@music/player-policy'
+import type { CurrentUser, PlaybackState, Playlist } from '@music/domain'
+import { emptyPlayback, reconcilePlayback } from '@music/player-policy'
 import { create } from 'zustand'
-import { createJSONStorage, persist } from 'zustand/middleware'
-import { sessionStore } from './platform/session'
+import { createPlaybackPersistence, sessionStore } from './platform/session'
 
-interface PlayerState {
-  playlistID: string | null
-  trackID: string | null
-  audioVersion: number | null
-  mode: PlaybackMode
-  playing: boolean
-  masterVolume: number
-  position: number
-  recovery: RecoveryState
+interface PlayerState extends PlaybackState {
   selectPlaylist: (id: string) => void
-  selectTrack: (id: string, recovery: RecoveryState, audioVersion?: number) => void
-  setAudioVersion: (audioVersion: number) => void
-  setMode: (mode: PlaybackMode) => void
+  selectTrack: (id: string, recovery: PlaybackState['recovery'], audioVersion?: number) => void
+  setAudioVersion: (audioVersion: number, position?: number) => void
+  setMode: (mode: PlaybackState['mode']) => void
   setPlaying: (playing: boolean) => void
   setMasterVolume: (volume: number) => void
   setPosition: (position: number) => void
+  reconcile: (playlists: Playlist[]) => void
 }
 
-export const usePlayer = create<PlayerState>()(persist((set) => ({
-  playlistID: null, trackID: null, audioVersion: null, mode: 'random', playing: false, masterVolume: 1, position: 0, recovery: {},
+export const usePlayer = create<PlayerState>()((set, get) => ({
+  ...emptyPlayback(),
   selectPlaylist: (playlistID) => set({ playlistID, trackID: null, audioVersion: null, playing: false, position: 0, recovery: {} }),
   selectTrack: (trackID, recovery, audioVersion = 1) => set({ trackID, audioVersion, recovery, playing: true, position: 0 }),
-  setAudioVersion: (audioVersion) => set({ audioVersion, position: 0 }),
+  setAudioVersion: (audioVersion, position = 0) => set({ audioVersion, position }),
   setMode: (mode) => set({ mode }), setPlaying: (playing) => set({ playing }),
   setMasterVolume: (masterVolume) => set({ masterVolume }), setPosition: (position) => set({ position }),
-}), { name: 'music-player-session-v1', storage: createJSONStorage(() => sessionStore) }))
+  reconcile: (playlists) => {
+    const next = reconcilePlayback(get(), playlists)
+    if (JSON.stringify(next) !== JSON.stringify(playbackState(get()))) set(next)
+  },
+}))
+
+function playbackState(state: PlaybackState): PlaybackState {
+  const { playlistID, trackID, audioVersion, mode, playing, masterVolume, position, recovery } = state
+  return { playlistID, trackID, audioVersion, mode, playing, masterVolume, position, recovery }
+}
+
+const persistence = createPlaybackPersistence(sessionStore)
+let unsubscribe: (() => void) | undefined
+export function initializePlayerSession(user: CurrentUser) {
+  unsubscribe?.()
+  persistence.flush()
+  usePlayer.setState(persistence.open(user))
+  const stop = usePlayer.subscribe((state, previous) => {
+    const immediate = state.playlistID !== previous.playlistID || state.trackID !== previous.trackID || state.audioVersion !== previous.audioVersion || state.mode !== previous.mode || state.playing !== previous.playing || state.masterVolume !== previous.masterVolume || state.recovery !== previous.recovery
+    if (immediate || state.position !== previous.position) persistence.save(playbackState(state), immediate)
+  })
+  unsubscribe = stop
+  return () => { if (unsubscribe === stop) { persistence.flush(); stop(); unsubscribe = undefined } }
+}
+export const flushPlayerSession = () => persistence.flush()

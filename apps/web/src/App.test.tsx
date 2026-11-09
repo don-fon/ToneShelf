@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Track } from '@music/domain'
 import { App } from './App'
 import { api } from './api'
+import { usePlayer } from './player-store'
 
 const track: Track = {
   id: 'track-1', title: 'World is Mine', artist: 'ryo', album: '', contentType: 'audio/mpeg', sizeBytes: 1,
@@ -27,14 +28,10 @@ vi.mock('./api', () => ({ api: {
   moveTrack: vi.fn().mockResolvedValue(undefined),
 } }))
 
-vi.mock('./player-store', () => ({ usePlayer: () => ({
-  playlistID: null, trackID: null, audioVersion: null, mode: 'random', playing: false, masterVolume: 1, position: 0, recovery: {},
-  selectPlaylist: vi.fn(), selectTrack: vi.fn(), setAudioVersion: vi.fn(), setMode: vi.fn(), setPlaying: vi.fn(), setMasterVolume: vi.fn(), setPosition: vi.fn(),
-}) }))
 
 vi.mock('./platform/audio', () => ({ WebAudioEngine: class {
   private readonly audio = document.createElement('audio')
-  load() {} play() { return Promise.resolve() } pause() {} seek() {} setVolume() {} element() { return this.audio }
+  load() {} play() { return Promise.resolve() } pause() {} seek() {} setVolume() {} position() { return this.audio.currentTime } element() { return this.audio }
 } }))
 
 const renderApp = () => {
@@ -42,7 +39,7 @@ const renderApp = () => {
   return render(<QueryClientProvider client={client}><App /></QueryClientProvider>)
 }
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
+afterEach(() => { cleanup(); usePlayer.setState(usePlayer.getInitialState(), true); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
   it('moves selected songs even when the destination already includes them', async () => {
@@ -106,6 +103,7 @@ describe('music library lifecycle', () => {
   })
 
   it('adds a song back to the default playlist from an ordinary playlist', async () => {
+    usePlayer.setState({ playlistID: 'source' })
     vi.mocked(api.playlists).mockResolvedValueOnce([
       { id: 'source', name: '普通歌单', isDefault: false, tracks: [track] },
       { id: 'default', name: '默认歌单', isDefault: true, tracks: [] },
@@ -237,6 +235,7 @@ describe('music library lifecycle', () => {
   })
 
   it('removes from an ordinary playlist without authorizing global deletion', async () => {
+    usePlayer.setState({ playlistID: 'ordinary' })
     vi.mocked(api.playlists).mockResolvedValueOnce([
       { id: 'ordinary', name: '普通歌单', isDefault: false, tracks: [track] },
       { id: 'default', name: '默认歌单', isDefault: true, tracks: [] },

@@ -3,8 +3,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Track } from '@music/domain'
 import { App } from './App'
-import { usePlayer } from './player-store'
+import { initializePlayerSession, usePlayer } from './player-store'
 import { api } from './api'
+import { playbackStorageKey } from './platform/session'
 
 const audio = vi.hoisted(() => ({
   element: null as HTMLAudioElement | null,
@@ -21,6 +22,7 @@ vi.mock('./platform/audio', () => ({ WebAudioEngine: class {
   setVolume(value: number) { audio.volume(value) }
   play() { return audio.play() }
   pause() { audio.pause() }
+  position() { return audio.element!.currentTime }
   element() { return audio.element! }
 } }))
 
@@ -58,6 +60,63 @@ async function setup(playing = true) {
 }
 
 describe('independent playback controls', () => {
+  it('waits for the library before validating restored playback and pauses if autoplay is blocked', async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof api.playlists>>) => void
+    vi.mocked(api.playlists).mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    usePlayer.setState({ playlistID: 'list', trackID: track.id, audioVersion: 1, position: 48, playing: true })
+    const query = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={query}><App/></QueryClientProvider>)
+    await screen.findByText('正在载入音乐空间…')
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(usePlayer.getState().position).toBe(48)
+    audio.play.mockRejectedValueOnce(new DOMException('blocked', 'NotAllowedError'))
+    await act(async () => { resolve([{ id: 'list', name: 'list', isDefault: true, tracks: [track] }]) })
+    await waitFor(() => expect(usePlayer.getState().playing).toBe(false))
+    expect(audio.seek).toHaveBeenCalledWith(48)
+    expect(usePlayer.getState().trackID).toBe(track.id)
+  })
+
+  it('saves progress on pause and page exit without writing on each timeupdate', async () => {
+    const stop = initializePlayerSession({ id: 'session-user', isDefault: false })
+    try {
+      await setup()
+      vi.useFakeTimers()
+      const writes = vi.spyOn(Storage.prototype, 'setItem')
+      for (let i = 0; i < 6; i++) {
+        audio.element!.currentTime = 50 + i
+        act(() => { audio.element!.dispatchEvent(new Event('timeupdate')) })
+        act(() => { vi.advanceTimersByTime(250) })
+      }
+      expect(writes).not.toHaveBeenCalled()
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(writes).toHaveBeenCalledTimes(1)
+      audio.element!.currentTime = 56.25
+      fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+      let saved = JSON.parse(sessionStorage.getItem(playbackStorageKey('session-user'))!)
+      expect(saved.state.position).toBe(56.25)
+      expect(saved.state.playing).toBe(false)
+      audio.element!.currentTime = 57
+      act(() => { window.dispatchEvent(new Event('pagehide')) })
+      saved = JSON.parse(sessionStorage.getItem(playbackStorageKey('session-user'))!)
+      expect(saved.state.position).toBe(57)
+    } finally { stop(); vi.useRealTimers() }
+  })
+
+  it('removes stale random entries when a playlist refresh removes songs', async () => {
+    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'removed', title: 'Removed song' }] }])
+    const query = await setup()
+    act(() => {
+      usePlayer.setState({ recovery: { song: 0, removed: 1, otherList: 2 } })
+      query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track] }])
+    })
+    await waitFor(() => expect(usePlayer.getState().recovery).toEqual({ song: 0 }))
+    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [] }]) })
+    await waitFor(() => expect(usePlayer.getState().trackID).toBeNull())
+    expect(usePlayer.getState().playing).toBe(false)
+    expect(usePlayer.getState().position).toBe(0)
+    expect(usePlayer.getState().recovery).toEqual({})
+  })
+
   it('starts weighted random playback in the active playlist when no song is selected', async () => {
     const second = { ...track, id: 'second', title: 'Second', baseRandomWeight: 3, playbackStartSeconds: 7, audioVersion: 2, audioUrl: '/second?v=2' }
     vi.mocked(api.playlists).mockResolvedValueOnce([

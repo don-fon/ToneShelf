@@ -8,7 +8,8 @@ import { TrackCover } from './TrackCover'
 import { LyricsView } from './LyricsView'
 import { LyricsDisplaySettings } from './LyricsDisplaySettings'
 import { WebAudioEngine } from './platform/audio'
-import { usePlayer } from './player-store'
+import { watchSessionLifecycle } from './platform/session'
+import { flushPlayerSession, usePlayer } from './player-store'
 
 const bytes = (value = 0) => value >= 1024 ** 3 ? `${Number((value / 1024 ** 3).toFixed(1))} GiB` : `${(value / 1024 ** 2).toFixed(1)} MiB`
 const time = (value = 0) => `${Math.floor(value / 60)}:${Math.floor(value % 60).toString().padStart(2, '0')}`
@@ -21,7 +22,7 @@ const trackSubtitle = (track: Track) => {
 
 export function App() {
   const query = useQueryClient()
-  const { data: playlists = [], isLoading, error } = useQuery({ queryKey: ['playlists'], queryFn: api.playlists })
+  const { data: playlists = [], isLoading, error, dataUpdatedAt } = useQuery({ queryKey: ['playlists'], queryFn: api.playlists })
   const { data: quota } = useQuery({ queryKey: ['quota'], queryFn: api.quota })
   const { data: trash = [] } = useQuery({ queryKey: ['trash'], queryFn: api.trash })
   const player = usePlayer()
@@ -89,7 +90,22 @@ export function App() {
     return () => document.removeEventListener('pointerdown', close)
   }, [showQuota])
 
-  useEffect(() => { if (active && !player.playlistID) player.selectPlaylist(active.id) }, [active, player])
+  useEffect(() => {
+    if (isLoading || error) return
+    const previous = usePlayer.getState()
+    previous.reconcile(playlists)
+    const restored = usePlayer.getState()
+    if (restored.position !== previous.position) {
+      setPosition(restored.position)
+      if (restored.trackID && restored.trackID === previous.trackID && restored.audioVersion === previous.audioVersion) engine.seek(restored.position)
+    }
+  }, [playlists, dataUpdatedAt, isLoading, error, engine])
+
+  useEffect(() => watchSessionLifecycle(() => {
+    const state = usePlayer.getState()
+    if (state.trackID && current?.id === state.trackID) state.setPosition(engine.position())
+    flushPlayerSession()
+  }), [engine, current?.id])
   useEffect(() => {
     if (!current) return
     if (current.originalAudioUrl && current.originalContentType) engine.load(current.audioUrl, { url: current.originalAudioUrl, contentType: current.originalContentType })
@@ -98,7 +114,7 @@ export function App() {
     const end = current.playbackEndSeconds ?? current.durationSeconds
     const versionChanged = player.audioVersion !== current.audioVersion
     const target = !versionChanged && player.position >= start && player.position < end ? player.position : start
-    if (versionChanged) player.setAudioVersion(current.audioVersion)
+    if (versionChanged) player.setAudioVersion(current.audioVersion, target)
     engine.seek(target); setPosition(target)
   }, [engine, current?.id, current?.audioVersion, current?.audioUrl, current?.originalAudioUrl, current?.originalContentType])
 
@@ -107,15 +123,21 @@ export function App() {
   }, [engine, player.masterVolume, current?.volumeRatio])
 
   useEffect(() => {
+    if (isLoading || error) return
     if (!current) {
       engine.pause()
       if (player.playing) player.setPlaying(false)
       return
     }
     if (player.playing) engine.play().catch(() => player.setPlaying(false))
-    else engine.pause()
-  }, [engine, current?.id, current?.audioVersion, current?.audioUrl, current?.originalAudioUrl, current?.originalContentType, player.playing])
+    else {
+      engine.pause()
+      player.setPosition(engine.position())
+      flushPlayerSession()
+    }
+  }, [engine, current?.id, current?.audioVersion, current?.audioUrl, current?.originalAudioUrl, current?.originalContentType, player.playing, isLoading, error])
 
+  const seek = (seconds: number) => { engine.seek(seconds); setPosition(seconds); player.setPosition(seconds); flushPlayerSession() }
   const playTrack = (track: Track) => player.selectTrack(track.id, advanceRecovery(player.recovery, track.id), track.audioVersion)
   const next = () => {
     if (!active) return
@@ -133,7 +155,7 @@ export function App() {
         else next()
         return
       }
-      setPosition(audio.currentTime); player.setPosition(audio.currentTime)
+      setPosition(engine.position()); player.setPosition(engine.position())
     }
     const onEnded = () => player.mode === 'repeat-one' && current ? (audio.currentTime = current.playbackStartSeconds, void audio.play()) : next()
     const onError = () => { if (audio.error) player.setPlaying(false) }
@@ -199,7 +221,7 @@ export function App() {
         {!active?.tracks.length && <div className="empty"><b>这里还没有音乐</b><span>上传一个音频文件开始播放</span></div>}
       </section>
       </div></div>
-      {current ? <LyricsView coverURL={current.coverUrl} viewKey={mobileView} trackTitle={current.title} lyrics={current.lyrics} layout={current.lyricsLayout} primaryLine={current.lyricsPrimaryLine} position={position} onSeek={(seconds) => { engine.seek(seconds); setPosition(seconds); player.setPosition(seconds) }}/> : <section className="lyrics-panel lyrics-placeholder" aria-label="播放歌词"><span>♫</span><p>选择一首音乐，查看歌词</p></section>}
+      {current ? <LyricsView coverURL={current.coverUrl} viewKey={mobileView} trackTitle={current.title} lyrics={current.lyrics} layout={current.lyricsLayout} primaryLine={current.lyricsPrimaryLine} position={position} onSeek={seek}/> : <section className="lyrics-panel lyrics-placeholder" aria-label="播放歌词"><span>♫</span><p>选择一首音乐，查看歌词</p></section>}
       </div>
     </>}</main>
 
@@ -221,6 +243,6 @@ export function App() {
       <div className="actions"><button type="button" onClick={() => setEditing(null)}>取消</button><button className="primary">保存</button></div>
     </form></div>}
 
-    <footer className="player"><div className="now"><TrackCover src={current?.coverUrl}/><div><strong>{current?.title ?? '选择一首音乐'}</strong><small>{current?.artist || '尚未播放'}</small></div></div><div className="controls"><div><button onClick={() => player.setMode(player.mode === 'random' ? 'repeat-one' : 'random')}>{player.mode === 'random' ? '⤨' : '↻'}</button><button className="main" aria-label={player.playing ? '暂停' : '播放'} disabled={!current && (player.mode !== 'random' || !active?.tracks.length)} onClick={() => { if (current) player.setPlaying(!player.playing); else if (player.mode === 'random') next() }}>{player.playing ? 'Ⅱ' : '▶'}</button><button disabled={!active?.tracks.length} onClick={next}>▶|</button></div><label><span>{time(position)}</span><input type="range" min={current?.playbackStartSeconds ?? 0} max={current?.playbackEndSeconds ?? current?.durationSeconds ?? 1} step="0.1" value={position} onChange={(event) => { const nextPosition = Number(event.target.value); setPosition(nextPosition); engine.seek(nextPosition); player.setPosition(nextPosition) }}/><span>{time(current?.playbackEndSeconds ?? current?.durationSeconds)}</span></label></div><label className="volume">♪<input type="range" min="0" max="1" step="0.01" value={player.masterVolume} onChange={(event) => player.setMasterVolume(Number(event.target.value))}/></label></footer>
+    <footer className="player"><div className="now"><TrackCover src={current?.coverUrl}/><div><strong>{current?.title ?? '选择一首音乐'}</strong><small>{current?.artist || '尚未播放'}</small></div></div><div className="controls"><div><button onClick={() => player.setMode(player.mode === 'random' ? 'repeat-one' : 'random')}>{player.mode === 'random' ? '⤨' : '↻'}</button><button className="main" aria-label={player.playing ? '暂停' : '播放'} disabled={!current && (player.mode !== 'random' || !active?.tracks.length)} onClick={() => { if (current) player.setPlaying(!player.playing); else if (player.mode === 'random') next() }}>{player.playing ? 'Ⅱ' : '▶'}</button><button disabled={!active?.tracks.length} onClick={next}>▶|</button></div><label><span>{time(position)}</span><input type="range" min={current?.playbackStartSeconds ?? 0} max={current?.playbackEndSeconds ?? current?.durationSeconds ?? 1} step="0.1" value={position} onChange={(event) => { seek(Number(event.target.value)) }}/><span>{time(current?.playbackEndSeconds ?? current?.durationSeconds)}</span></label></div><label className="volume">♪<input type="range" min="0" max="1" step="0.01" value={player.masterVolume} onChange={(event) => player.setMasterVolume(Number(event.target.value))}/></label></footer>
   </div>
 }

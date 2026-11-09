@@ -1,4 +1,4 @@
-import type { LyricsSearchResult, Playlist, Quota, Track, UploadJob } from '@music/domain'
+import type { CurrentUser, LyricsSearchResult, Playlist, Quota, Track, UploadJob } from '@music/domain'
 
 import { uploadFile } from './platform/upload'
 import { createUploadKey } from './platform/upload-session'
@@ -15,6 +15,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 export const api = {
+  currentUser: () => request<CurrentUser>('/api/current-user'),
   playlists: async () => {
     const playlists = await request<PlaylistPayload[] | null>('/api/playlists')
     return (playlists ?? []).map((playlist) => ({ ...playlist, tracks: playlist.tracks ?? [] }))

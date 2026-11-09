@@ -71,7 +71,7 @@ export class WebAudioEngine implements AudioEngine {
     return true
   }
   setVolume(value: number) { this.audio.volume = Math.max(0, Math.min(1, value)) }
-  position() { return this.audio.currentTime || 0 }
+  position() { return this.pendingPosition ?? (this.audio.currentTime || 0) }
   duration() { return this.audio.duration || 0 }
   element() { return this.audio }
 }

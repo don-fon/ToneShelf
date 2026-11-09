@@ -77,3 +77,24 @@ export interface LyricsSearchResult {
 }
 
 export type PlaybackMode = 'random' | 'repeat-one'
+
+export interface CurrentUser { id: string; isDefault: boolean }
+
+export interface PlaybackState {
+  playlistID: string | null
+  trackID: string | null
+  audioVersion: number | null
+  mode: PlaybackMode
+  playing: boolean
+  masterVolume: number
+  position: number
+  recovery: Record<string, number>
+}
+
+export interface PlaybackSnapshot {
+  version: 2
+  userId: string
+  sessionId: string
+  savedAt: number
+  state: PlaybackState
+}

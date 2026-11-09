@@ -1,6 +1,7 @@
 import type { Track } from '@music/domain'
 
 export * from './lyrics'
+export * from './session'
 
 export type RecoveryState = Record<string, number>
 

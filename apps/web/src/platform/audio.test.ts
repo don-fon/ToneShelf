@@ -24,8 +24,11 @@ describe('original audio with fallback', () => {
     engine.seek(48)
     expect(audio.src).toMatch(/original\.flac$/)
     expect(audio.currentTime).toBe(0)
+    engine.pause()
+    expect(engine.position()).toBe(48) // Persistence must retain pending seeks before metadata arrives.
     metadata()
     expect(audio.currentTime).toBe(48)
+    expect(engine.position()).toBe(48)
   })
 
   it('selects the fallback immediately for an unsupported format', () => {
