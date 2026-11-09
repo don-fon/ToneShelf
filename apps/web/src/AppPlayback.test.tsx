@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Track } from '@music/domain'
 import { App } from './App'
 import { usePlayer } from './player-store'
+import { api } from './api'
 
 const audio = vi.hoisted(() => ({
   element: null as HTMLAudioElement | null,
@@ -41,6 +42,7 @@ afterEach(() => {
   usePlayer.setState(usePlayer.getInitialState(), true)
   sessionStorage.clear()
   vi.clearAllMocks()
+  vi.restoreAllMocks()
 })
 
 async function setup(playing = true) {
@@ -56,6 +58,45 @@ async function setup(playing = true) {
 }
 
 describe('independent playback controls', () => {
+  it('starts weighted random playback in the active playlist when no song is selected', async () => {
+    const second = { ...track, id: 'second', title: 'Second', baseRandomWeight: 3, playbackStartSeconds: 7, audioVersion: 2, audioUrl: '/second?v=2' }
+    vi.mocked(api.playlists).mockResolvedValueOnce([
+      { id: 'other', name: 'Other playlist', isDefault: true, tracks: [{ ...track, id: 'outside', baseRandomWeight: 1000000 }] },
+      { id: 'list', name: 'Active playlist', isDefault: false, tracks: [track, second] },
+    ])
+    usePlayer.setState({ playlistID: 'list', trackID: null, mode: 'random', playing: false })
+    const query = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={query}><App/></QueryClientProvider>)
+    await screen.findByRole('button', { name: '设置 Second' })
+    vi.spyOn(Math, 'random').mockReturnValue(.3)
+    const toggle = screen.getByRole('button', { name: '播放' }) as HTMLButtonElement
+    expect(toggle.disabled).toBe(false)
+    fireEvent.click(toggle)
+    await waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1))
+    expect(usePlayer.getState().trackID).toBe('second')
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(usePlayer.getState().audioVersion).toBe(2)
+    expect(usePlayer.getState().recovery).toEqual({ second: 0 })
+    expect(audio.load).toHaveBeenCalledWith('/second?v=2')
+    expect(audio.seek).toHaveBeenCalledWith(7)
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    expect(usePlayer.getState().playing).toBe(false)
+    expect(usePlayer.getState().trackID).toBe('second')
+  })
+
+  it.each(['empty', 'repeat-one'] as const)('keeps play disabled without a selected song for %s', async (scenario) => {
+    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'list', name: 'Test playlist', isDefault: true, tracks: scenario === 'empty' ? [] : [track] }])
+    usePlayer.setState({ playlistID: 'list', trackID: null, playing: false, mode: scenario === 'repeat-one' ? 'repeat-one' : 'random' })
+    const query = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={query}><App/></QueryClientProvider>)
+    await screen.findByRole('heading', { name: 'Test playlist' })
+    const toggle = screen.getByRole('button', { name: '播放' }) as HTMLButtonElement
+    expect(toggle.disabled).toBe(true)
+    fireEvent.click(toggle)
+    expect(audio.play).not.toHaveBeenCalled()
+    expect(usePlayer.getState().trackID).toBeNull()
+  })
+
   it('prefers the original source when the server advertises one', async () => {
     const query = await setup()
     act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, originalAudioUrl: '/original', originalContentType: 'audio/flac' }] }]) })
