@@ -1,63 +1,68 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Track } from '@music/domain'
 import { CoverPicker } from './CoverPicker'
 import { api } from './api'
 
-vi.mock('./api', () => ({ api: { searchCovers: vi.fn(), selectCover: vi.fn(), jobs: vi.fn().mockResolvedValue([]) } }))
+vi.mock('./api', () => ({ api: { replaceCover: vi.fn(), jobs: vi.fn().mockResolvedValue([]) } }))
+beforeEach(() => { URL.createObjectURL = vi.fn(() => 'blob:preview'); URL.revokeObjectURL = vi.fn() })
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 const track = { id: 'song', title: 'Song', artist: 'Singer', album: 'Album' } as Track
-const candidate = { id: 'release', title: 'Release album', artist: 'Singer', score: 90, version: 'live', durationSeconds: 123 }
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const busy = vi.fn()
-  render(<QueryClientProvider client={client}><CoverPicker track={track} onBusyChange={busy}/></QueryClientProvider>)
-  fireEvent.click(screen.getByText('在线查找'))
-  return { client, busy }
+  const view = render(<QueryClientProvider client={client}><CoverPicker track={track} onBusyChange={busy}/></QueryClientProvider>)
+  return { client, busy, view }
+}
+const choose = (file = new File(['image'], 'cover.png', { type: 'image/png' })) => {
+  fireEvent.change(screen.getByLabelText('选择封面图片'), { target: { files: [file] } })
+  return file
 }
 
-it('keeps search separate from metadata, previews candidates and saves only after confirmation', async () => {
-  vi.mocked(api.searchCovers).mockResolvedValue({ queryTitle: 'Song', queryArtist: 'Singer', candidates: [candidate], expanded: false, partial: false })
-  vi.mocked(api.selectCover).mockResolvedValue({ id: 'job', kind: 'cover', fileName: '', state: 'queued', reservedBytes: 0, createdAt: '' })
+it('previews a local file and uploads only after saving', async () => {
+  vi.mocked(api.replaceCover).mockResolvedValue({ id: 'job', kind: 'cover', fileName: '', state: 'queued', reservedBytes: 0, createdAt: '' })
   vi.mocked(api.jobs).mockResolvedValue([{ id: 'job', kind: 'cover', fileName: '', state: 'succeeded', reservedBytes: 0, createdAt: '' }])
   setup()
-  fireEvent.change(screen.getByLabelText('封面搜索歌名'), { target: { value: 'Japanese title' } })
-  fireEvent.keyDown(screen.getByLabelText('封面搜索歌名'), { key: 'Enter' })
-  fireEvent.click(await screen.findByRole('button', { name: /Release album/ }))
-  expect(api.searchCovers).toHaveBeenCalledWith('song', { title: 'Japanese title', artist: 'Singer', album: 'Album' })
-  expect(api.selectCover).not.toHaveBeenCalled()
-  expect(screen.getByAltText('Release album封面').getAttribute('src')).toBe('/api/tracks/song/cover/candidates/release')
-  expect(screen.getByText(/live/)).toBeTruthy()
+  const file = choose()
+  expect((await screen.findByAltText('新封面预览')).getAttribute('src')).toBe('blob:preview')
+  expect(api.replaceCover).not.toHaveBeenCalled()
+  expect(screen.queryByText('查找封面')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '保存封面' }))
   await screen.findByText('封面已保存')
-  expect(api.selectCover).toHaveBeenCalledExactlyOnceWith('song', 'release')
+  expect(api.replaceCover).toHaveBeenCalledExactlyOnceWith('song', file)
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
 })
-
-it('shows service errors, empty results and unavailable preview images', async () => {
-  vi.mocked(api.searchCovers).mockRejectedValueOnce(new Error('HTTP 503')).mockResolvedValueOnce({ queryTitle: '', queryArtist: '', candidates: [], expanded: true, partial: false }).mockResolvedValueOnce({ queryTitle: '', queryArtist: '', candidates: [candidate], expanded: false, partial: true })
+it('rejects oversized files and failed image previews without uploading', async () => {
   setup()
-  fireEvent.click(screen.getByRole('button', { name: '查找封面' }))
-  expect((await screen.findByRole('alert')).textContent).toContain('503')
-  fireEvent.click(screen.getByRole('button', { name: '查找封面' }))
-  await screen.findByText(/没有找到可用封面/)
-  fireEvent.click(screen.getByRole('button', { name: '查找封面' }))
-  const image = await screen.findByAltText('Release album封面')
-  fireEvent.error(image)
-  expect(screen.getByText('不可用')).toBeTruthy()
-  expect((screen.getByRole('button', { name: /Release album/ }) as HTMLButtonElement).disabled).toBe(true)
+  const large = new File(['image'], 'large.png', { type: 'image/png' })
+  Object.defineProperty(large, 'size', { value: 8 * 1024 * 1024 + 1 })
+  choose(large)
+  expect(screen.getByRole('alert').textContent).toContain('8 MiB')
   expect(screen.queryByRole('button', { name: '保存封面' })).toBeNull()
+  choose()
+  fireEvent.error(await screen.findByAltText('新封面预览'))
+  expect((screen.getByRole('button', { name: '保存封面' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(api.replaceCover).not.toHaveBeenCalled()
 })
 
-it('reports background save failures and allows retrying without losing the selection', async () => {
-  vi.mocked(api.searchCovers).mockResolvedValue({ queryTitle: '', queryArtist: '', candidates: [candidate], expanded: false, partial: false })
-  vi.mocked(api.selectCover).mockResolvedValue({ id: 'job', fileName: '', state: 'queued', reservedBytes: 0, createdAt: '' })
+it('reports processing failures and retains the chosen file for retry', async () => {
+  vi.mocked(api.replaceCover).mockResolvedValue({ id: 'job', fileName: '', state: 'queued', reservedBytes: 0, createdAt: '' })
   vi.mocked(api.jobs).mockResolvedValue([{ id: 'job', fileName: '', state: 'failed', error: '存储空间不足', reservedBytes: 0, createdAt: '' }])
   const { busy } = setup()
-  fireEvent.click(screen.getByRole('button', { name: '查找封面' }))
-  fireEvent.click(await screen.findByRole('button', { name: /Release album/ }))
+  choose()
   fireEvent.click(screen.getByRole('button', { name: '保存封面' }))
   await screen.findByText('存储空间不足')
   await waitFor(() => expect((screen.getByRole('button', { name: '保存封面' }) as HTMLButtonElement).disabled).toBe(false))
   expect(busy).toHaveBeenCalledWith(true)
+  expect(screen.getByAltText('新封面预览')).toBeTruthy()
+})
+
+it('releases preview object URLs when closed without saving', async () => {
+  const { view } = setup()
+  choose()
+  await screen.findByAltText('新封面预览')
+  view.unmount()
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
+  expect(api.replaceCover).not.toHaveBeenCalled()
 })

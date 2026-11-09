@@ -116,7 +116,19 @@ func (a *API) recoverUserJobs(ctx context.Context) error {
 					}
 					continue
 				}
-				if err = a.Store.SetJobReservation(ctx, job.ID, 0); err != nil {
+				reservation := int64(0)
+				if job.Kind == "cover" && job.CoverInputPath != "" {
+					info, statErr := os.Stat(job.CoverInputPath)
+					if statErr != nil {
+						if err = a.Store.SetJobState(ctx, job.ID, "processing", "failed", "封面图片缺失，请重新上传"); err != nil {
+							return err
+						}
+						a.cleanFailedJob(ctx, job)
+						continue
+					}
+					reservation = info.Size()
+				}
+				if err = a.Store.SetJobReservation(ctx, job.ID, reservation); err != nil {
 					return err
 				}
 				if err = a.Store.SetJobState(ctx, job.ID, "processing", "queued", ""); err != nil {
@@ -216,8 +228,8 @@ func canonicalPath(path string) string {
 
 func (a *API) processJob(ctx context.Context, job store.UploadJob) {
 	if job.Kind == "cover" {
-		if job.CoverReleaseID != "" {
-			a.processOnlineCover(ctx, job)
+		if job.CoverInputPath != "" {
+			a.processUploadedCover(ctx, job)
 			return
 		}
 		a.processCover(ctx, job)
@@ -258,7 +270,7 @@ func (a *API) processJob(ctx context.Context, job store.UploadJob) {
 }
 
 func (a *API) cleanFailedJob(ctx context.Context, job store.UploadJob) {
-	paths := []string{job.OutputPath + ".download", job.OutputPath, job.OutputPath + ".stream", job.OutputPath + ".cover.jpg"}
+	paths := []string{job.CoverInputPath, job.OutputPath + ".download", job.OutputPath, job.OutputPath + ".stream", job.OutputPath + ".cover.jpg"}
 	if job.Kind != "repair" && job.Kind != "cover" {
 		paths = append(paths, job.SourcePath)
 	}

@@ -11,24 +11,9 @@ import (
 	"os/exec"
 )
 
-func (p *Processor) ImportCover(ctx context.Context, output string, download func(io.Writer) error, reserve func(int64) error) (int64, error) {
-	raw := output + ".download"
-	file, err := os.OpenFile(raw, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return 0, err
-	}
-	writer := &reservedWriter{writer: file, reserve: reserve}
-	err = download(writer)
-	if err == nil {
-		err = file.Sync()
-	}
-	closeErr := file.Close()
-	if err != nil {
-		return 0, err
-	}
-	if closeErr != nil {
-		return 0, closeErr
-	}
+const MaxCoverBytes int64 = 8 * 1024 * 1024
+
+func (p *Processor) NormalizeCover(ctx context.Context, raw, output string, reserve func(int64) error) (int64, error) {
 	// Reject playlists and other non-image formats before invoking a media parser.
 	header, err := os.Open(raw)
 	if err != nil {
@@ -67,11 +52,11 @@ func (p *Processor) ImportCover(ctx context.Context, output string, download fun
 	default:
 		return 0, errors.New("封面格式不受支持")
 	}
-	file, err = os.OpenFile(output, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(output, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return 0, err
 	}
-	writer = &reservedWriter{writer: file, reserve: reserve}
+	writer := &reservedWriter{writer: file, reserve: reserve}
 	command := exec.CommandContext(ctx, p.FFmpeg, "-v", "error", "-nostdin", "-protocol_whitelist", "file,pipe", "-i", raw, "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=512:512:force_original_aspect_ratio=decrease", "-c:v", "mjpeg", "-q:v", "4", "-threads", "1", "-f", "image2pipe", "pipe:1")
 	command.Stdout = writer
 	err = command.Run()
@@ -81,7 +66,7 @@ func (p *Processor) ImportCover(ctx context.Context, output string, download fun
 	if err == nil {
 		err = file.Sync()
 	}
-	closeErr = file.Close()
+	closeErr := file.Close()
 	if err != nil {
 		return 0, err
 	}
@@ -99,9 +84,6 @@ func (p *Processor) ImportCover(ctx context.Context, output string, download fun
 	}
 	info, err := os.Stat(output)
 	if err != nil {
-		return 0, err
-	}
-	if err = os.Remove(raw); err != nil {
 		return 0, err
 	}
 	return info.Size(), nil

@@ -80,25 +80,6 @@ export type PlaybackMode = 'random' | 'repeat-one'
 
 export interface CurrentUser { id: string; isDefault: boolean }
 
-export interface CoverCandidate {
-  id: string
-  title: string
-  artist: string
-  date?: string
-  country?: string
-  version?: string
-  durationSeconds?: number
-  score: number
-}
-export interface CoverSearchInput { title: string; artist: string; album: string }
-export interface CoverSearchResult {
-  queryTitle: string
-  queryArtist: string
-  candidates: CoverCandidate[]
-  expanded: boolean
-  partial: boolean
-}
-
 export interface PlaybackState {
   playlistID: string | null
   trackID: string | null
