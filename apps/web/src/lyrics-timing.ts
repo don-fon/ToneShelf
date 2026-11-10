@@ -1,0 +1,1 @@
+export const LYRICS_ANIMATION_LEAD_SECONDS = 0.3

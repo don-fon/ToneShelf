@@ -4,7 +4,7 @@ import { TrackCover } from './TrackCover'
 import { LyricText } from './LyricText'
 import { activeLyricIndex, parseLyrics } from '@music/player-policy'
 
-const LYRICS_ANIMATION_LEAD_SECONDS = 0.3
+import { LYRICS_ANIMATION_LEAD_SECONDS } from './lyrics-timing'
 
 interface LyricsViewProps {
   coverURL?: string
