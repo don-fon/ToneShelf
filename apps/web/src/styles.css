@@ -115,7 +115,7 @@ aside nav{min-height:0;overflow:auto;overscroll-behavior:contain}
 .quota-disclosure{flex-shrink:0}
 .quota-disclosure .quota{margin-top:0;padding:10px 12px}
 @media(max-width:800px){
-  .shell>aside{position:relative}
+  .shell>aside{position:relative;z-index:9}
   .shell>aside header{padding-right:80px}
   .shell>aside nav{padding-right:80px}
   .quota-disclosure{position:absolute;right:16px;top:16px;z-index:8}
