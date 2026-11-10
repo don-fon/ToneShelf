@@ -44,6 +44,18 @@ const renderApp = () => {
 afterEach(() => { cleanup(); usePlayer.setState(usePlayer.getInitialState(), true); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
+  it.each(['.cover', '.now-meta strong', '.now-meta small'])('opens lyrics from the player information area %s', async (selector) => {
+    vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    renderApp()
+    fireEvent.click(await screen.findByRole('group', { name: '歌曲 World is Mine' }))
+    const entry = screen.getByRole('button', { name: '查看歌词：World is Mine' })
+    expect(entry.contains(document.querySelector('.player .cover'))).toBe(true)
+    expect(entry.contains(document.querySelector('.player small'))).toBe(true)
+    fireEvent.click(entry.querySelector(selector)!)
+    expect(document.querySelector('.music-workspace')?.getAttribute('data-view')).toBe('lyrics')
+    expect(usePlayer.getState().trackID).toBe(track.id)
+    expect(usePlayer.getState().playing).toBe(true)
+  })
   it('groups trash and storage apart from playlists and keeps active uploads near the upload button', async () => {
     vi.mocked(api.jobs).mockResolvedValueOnce([{ id: 'upload', state: 'processing', kind: 'upload', fileName: 'test.mp3', createdAt: '', reservedBytes: 0 }])
     renderApp()
