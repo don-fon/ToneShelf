@@ -89,13 +89,13 @@ describe('upload task UI', () => {
 
   it('does not badge historical tasks, including thirteen successful uploads', async () => {
     vi.mocked(api.jobs).mockResolvedValue(Array.from({ length: 13 }, (_, i) => ({ id: `old-${i}`, fileName: `old-${i}.mp3`, state: 'succeeded' as const, reservedBytes: 0, createdAt: '' })))
-    renderTasks()
-    expect(await screen.findByText('old-12.mp3')).toBeTruthy()
-    expect(document.querySelector('.upload-tasks summary span')).toBeNull()
+    const { client } = renderTasks()
+    await waitFor(() => expect(client.getQueryState(['jobs'])?.status).toBe('success'))
+    expect(document.querySelector('.upload-tasks')).toBeNull()
   })
 
-  it('keeps the session count after remounting and does not double count server jobs', async () => {
-    vi.mocked(api.prepareUpload).mockImplementation(async (_file, _progress) => {
+  it('keeps an immediate success on the page but does not reload it as history', async () => {
+    vi.mocked(api.prepareUpload).mockImplementation(async () => {
       const job: UploadJob = { id: 'new', fileName: 'new.mp3', state: 'succeeded', reservedBytes: 0, createdAt: '' }
       vi.mocked(api.jobs).mockResolvedValue([job])
       return job
@@ -103,17 +103,43 @@ describe('upload task UI', () => {
     const view = renderTasks()
     await waitFor(() => expect(view.client.getQueryState(['jobs'])?.status).toBe('success'))
     fireEvent.change(screen.getByLabelText('上传音乐文件'), { target: { files: [new File(['a'], 'new.mp3')] } })
-    expect(await screen.findByText('成功')).toBeTruthy()
-    expect(document.querySelector('.upload-tasks summary span')?.textContent).toBe('1')
+    expect(await screen.findByText('上传完成')).toBeTruthy()
+    expect(document.querySelector('.upload-tasks summary span')).toBeNull()
     view.unmount()
     const restored = renderTasks()
-    expect(await screen.findByText('new.mp3')).toBeTruthy()
-    expect(document.querySelector('.upload-tasks summary span')?.textContent).toBe('1')
-    restored.unmount()
-    sessionStorage.clear()
+    await waitFor(() => expect(restored.client.getQueryState(['jobs'])?.status).toBe('success'))
+    expect(document.querySelector('.upload-tasks')).toBeNull()
+  })
+
+  it('keeps completed uploads until refresh without automatically opening or continuing to poll', async () => {
+    vi.useFakeTimers()
+    const job: UploadJob = { id: 'active', fileName: 'active.mp3', state: 'processing', reservedBytes: 0, createdAt: '' }
+    vi.mocked(api.jobs).mockResolvedValueOnce([job]).mockResolvedValue([{ ...job, state: 'succeeded' }])
     renderTasks()
-    expect(await screen.findByText('new.mp3')).toBeTruthy()
-    expect(document.querySelector('.upload-tasks summary span')).toBeNull()
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(document.querySelector('.upload-tasks summary span')?.textContent).toBe('1')
+    expect((document.querySelector('.upload-tasks') as HTMLDetailsElement).open).toBe(false)
+    ;(document.querySelector('.upload-tasks') as HTMLDetailsElement).open = true
+    fireEvent(document.querySelector('.upload-tasks')!, new Event('toggle'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
+    expect(screen.getByText('上传完成')).toBeTruthy()
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(screen.getByText('上传完成')).toBeTruthy()
+    expect((document.querySelector('.upload-tasks') as HTMLDetailsElement).open).toBe(true)
+    expect(api.jobs).toHaveBeenCalledTimes(2)
+  })
+
+  it('allows dismissing failures without hiding another running task', async () => {
+    const failed: UploadJob = { id: 'failed', fileName: 'failed.mp3', state: 'failed', error: '转码失败', reservedBytes: 0, createdAt: '' }
+    const active: UploadJob = { ...failed, id: 'active', fileName: 'active.mp3', state: 'processing', error: undefined }
+    vi.mocked(api.jobs).mockResolvedValue([failed, active])
+    const { client } = renderTasks()
+    fireEvent.click(await screen.findByRole('button', { name: '关闭失败提示' }))
+    expect(screen.queryByText('failed.mp3')).toBeNull()
+    expect(screen.getByText('active.mp3')).toBeTruthy()
+    expect(document.querySelector('.upload-tasks summary span')?.textContent).toBe('1')
+    await act(async () => { await client.invalidateQueries({ queryKey: ['jobs'] }) })
+    expect(screen.queryByText('failed.mp3')).toBeNull()
   })
 
   it('includes replacement requests created elsewhere in the same page', async () => {
@@ -173,7 +199,7 @@ describe('upload task UI', () => {
     renderTasks()
     expect(await screen.findByText('replacement.flac')).toBeTruthy()
     expect(screen.getByText('（替换音频）')).toBeTruthy()
-    expect(document.querySelector('.upload-tasks summary span')).toBeNull()
+    expect(document.querySelector('.upload-tasks summary span')?.textContent).toBe('1')
     expect(screen.queryByText('internal.mp3')).toBeNull()
   })
   it('stops polling after the active task succeeds', async () => {
@@ -238,9 +264,9 @@ describe('upload task UI', () => {
   })
 
   it('loads durable task status after remounting without selected files', async () => {
-    vi.mocked(api.jobs).mockResolvedValue([{ id: 'persisted', fileName: 'persisted.aac', state: 'succeeded', reservedBytes: 0, createdAt: '' }])
+    vi.mocked(api.jobs).mockResolvedValue([{ id: 'persisted', fileName: 'persisted.aac', state: 'processing', reservedBytes: 0, createdAt: '' }])
     const view = renderTasks()
-    expect(await screen.findByText('成功')).toBeTruthy()
+    expect(await screen.findByText('处理中')).toBeTruthy()
     view.unmount()
     renderTasks()
     expect(await screen.findByText('persisted.aac')).toBeTruthy()

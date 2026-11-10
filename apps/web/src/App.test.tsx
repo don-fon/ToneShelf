@@ -44,13 +44,15 @@ const renderApp = () => {
 afterEach(() => { cleanup(); usePlayer.setState(usePlayer.getInitialState(), true); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
-  it('groups trash, uploads and storage apart from playlist navigation without branding', async () => {
-    vi.mocked(api.jobs).mockResolvedValueOnce([{ id: 'upload', state: 'succeeded', kind: 'upload', fileName: 'test.mp3', createdAt: '', reservedBytes: 0 }])
+  it('groups trash and storage apart from playlists and keeps active uploads near the upload button', async () => {
+    vi.mocked(api.jobs).mockResolvedValueOnce([{ id: 'upload', state: 'processing', kind: 'upload', fileName: 'test.mp3', createdAt: '', reservedBytes: 0 }])
     renderApp()
     const tools = await screen.findByRole('group', { name: '音乐库工具' })
     const trash = within(tools).getByRole('button', { name: '回收站' })
     expect(within(tools).getByRole('button', { name: '存储空间' })).toBeTruthy()
-    expect(await within(tools).findByText('上传任务')).toBeTruthy()
+    expect(await screen.findByText('上传中')).toBeTruthy()
+    expect(tools.querySelector('.upload-tasks')).toBeNull()
+    expect(document.querySelector('.upload-actions .upload-tasks')).toBeTruthy()
     expect(within(screen.getByRole('navigation')).queryByRole('button', { name: '回收站' })).toBeNull()
     expect(screen.queryByText('音乐空间')).toBeNull()
     expect(screen.queryByText('你的私人播放站')).toBeNull()

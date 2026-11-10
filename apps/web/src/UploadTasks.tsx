@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
-import { createUploadKey, uploadSession } from './platform/upload-session'
+import { createUploadKey } from './platform/upload-session'
 import type { UploadJob } from '@music/domain'
 import { createPortal } from 'react-dom'
 
@@ -10,9 +10,23 @@ type LocalUpload = { id: string; name: string; progress: number; error?: string;
 let nextCheckID = 0
 const labels = { receiving: '上传中', queued: '等待处理', processing: '处理中', succeeded: '成功', failed: '失败' }
 
-export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
+export function UploadTasks({ playlistID, anchor, lyricsView = false }: { playlistID?: string; anchor?: HTMLElement | null; lyricsView?: boolean } = {}) {
   const query = useQueryClient()
-  const sessionCount = useSyncExternalStore(uploadSession.subscribe, uploadSession.count)
+  const [compact, setCompact] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia?.('(max-width:1100px)')
+    if (!media) return
+    setCompact(media.matches)
+    const update = () => setCompact(media.matches)
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  const tracked = useRef(new Set<string>())
+  const notified = useRef(new Set<string>())
+  const [recent, setRecent] = useState<string[]>([])
+  const [dismissed, setDismissed] = useState<string[]>([])
+  const [ignoredError, setIgnoredError] = useState<Error | null>(null)
+  const [expanded, setExpanded] = useState(false)
   const [local, setLocal] = useState<LocalUpload[]>([])
   const [deciding, setDeciding] = useState<string[]>([])
   const [decisionError, setDecisionError] = useState('')
@@ -42,6 +56,7 @@ export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
   useEffect(() => { void query.invalidateQueries({ queryKey: ['quota'] }) }, [reservations, query])
   const enqueue = async (prepared: UploadJob) => {
     const id = createUploadKey()
+    tracked.current.add(prepared.id)
     setLocal((items) => [...items, { id, name: prepared.fileName, progress: 100, jobID: prepared.id }])
     try {
       await api.resolveUpload(prepared.id, true, id)
@@ -78,6 +93,17 @@ export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
     }
   }
   const userJobs = jobs.filter((job) => job.kind !== 'repair' && job.kind !== 'cover' && job.kind !== 'preflight' && !(job.state === 'failed' && job.error === '已取消'))
+  useEffect(() => {
+    const completed: string[] = []
+    for (const job of userJobs) {
+      if (job.state !== 'succeeded' && job.state !== 'failed') tracked.current.add(job.id)
+      if (job.state === 'succeeded' && tracked.current.has(job.id) && !notified.current.has(job.id)) {
+        notified.current.add(job.id); completed.push(job.id)
+      }
+    }
+    if (completed.length) setRecent((ids) => [...ids, ...completed])
+    setLocal((items) => items.filter((item) => item.error || !jobs.some((job) => job.id === item.jobID && ['succeeded', 'failed'].includes(job.state))))
+  }, [snapshot])
   const resolve = async (id: string, overwrite: boolean) => {
     setDeciding((items) => [...items, id])
     setDecisionError('')
@@ -91,8 +117,18 @@ export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
       setDeciding((items) => items.filter((item) => item !== id))
     }
   }
-  const pending = local.filter((item) => !jobs.some((job) => job.id === item.jobID || (job.requestKey === item.id && job.state !== 'receiving')))
-  const visibleJobs = userJobs.filter((job) => job.state !== 'receiving' || !pending.some((item) => item.id === job.requestKey))
+  const pending = local.filter((item) => !dismissed.includes(item.id) && (item.error || !jobs.some((job) => job.id === item.jobID || (job.requestKey === item.id && job.state !== 'receiving'))))
+  const visibleJobs = userJobs.filter((job) => (job.state !== 'succeeded' || recent.includes(job.id)) && (job.state !== 'failed' || !dismissed.includes(job.id)) && (job.state !== 'receiving' || !pending.some((item) => item.id === job.requestKey)))
+  const running = pending.filter((item) => !item.error).length + visibleJobs.filter((job) => !['succeeded', 'failed'].includes(job.state)).length
+  const failed = pending.filter((item) => item.error).length + visibleJobs.filter((job) => job.state === 'failed').length
+  const queryError = error && error !== ignoredError ? error : null
+  const needsChoice = visibleJobs.some((job) => job.requiresConfirmation)
+  useEffect(() => { if (failed > 0 || queryError || needsChoice) setExpanded(true) }, [failed, queryError, needsChoice])
+  const destination = anchor && !(compact && lyricsView) ? anchor : document.body
+  const dismissFailures = () => {
+    setDismissed((ids) => [...ids, ...pending.filter((item) => item.error).map((item) => item.id), ...visibleJobs.filter((job) => job.state === 'failed').map((job) => job.id)])
+    setIgnoredError(error); setDecisionError('')
+  }
   return <>
     <input className="upload-input" id="music-upload" aria-label="上传音乐文件" type="file" multiple accept={audioAccept} onChange={(event) => { select(Array.from(event.target.files ?? [])); event.target.value = '' }}/>
     {createPortal(<>
@@ -100,16 +136,17 @@ export function UploadTasks({ playlistID }: { playlistID?: string } = {}) {
     {checkError && conflicts.length === 0 && <div className="upload-check-notice error" role="alert">{checkError}<button type="button" onClick={() => setCheckError('')} aria-label="关闭检查提示">×</button></div>}
     {conflicts.length > 0 && <div className="modal"><form className="upload-confirm" role="dialog" aria-modal="true" aria-labelledby="upload-confirm-title" onSubmit={(event) => { event.preventDefault(); void choose(true) }}><h2 id="upload-confirm-title">发现同名歌曲</h2><p>已存在“{conflicts[0].conflictTitle}”，是否覆盖音频？</p><p className="upload-confirm-note">歌词、播放设置和歌单关系将保留。</p>{checkError && <p className="error" role="alert">{checkError}</p>}<div className="upload-confirm-actions"><button type="button" disabled={confirming} onClick={() => void choose(false)}>取消</button><button className="primary" disabled={confirming}>覆盖</button></div></form></div>}
     </>, document.body)}
-    {(pending.length > 0 || visibleJobs.length > 0 || error) && <details className="upload-tasks" open={pending.length > 0 || visibleJobs.some((job) => ['receiving', 'queued', 'processing', 'failed'].includes(job.state))}>
-      <summary aria-label="上传任务" title={sessionCount ? `本次会话新增 ${sessionCount} 个上传任务` : '上传任务'}><svg className="upload-task-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V3m-4 4 4-4 4 4M4 15v5h16v-5"/></svg><b className="upload-task-label">上传任务</b>{sessionCount > 0 && <span>{sessionCount}</span>}</summary>
+    {(pending.length > 0 || visibleJobs.length > 0 || queryError) && createPortal(<div className={`upload-activity ${destination === document.body ? 'floating' : ''}`}><details className="upload-tasks" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+      <summary aria-label="上传任务" title="上传任务"><svg className="upload-task-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V3m-4 4 4-4 4 4M4 15v5h16v-5"/></svg><b className="upload-task-label">{running ? '上传中' : failed || queryError ? '上传失败' : '上传完成'}</b>{running > 0 && <span>{running}</span>}</summary>
       <div className="upload-task-content">
-      {error && <p className="error">无法获取任务状态：{error.message}</p>}
+      {queryError && <p className="error">无法获取任务状态：{queryError.message}</p>}
+      {(failed > 0 || queryError) && <button type="button" className="dismiss-upload-errors" aria-label="关闭失败提示" onClick={dismissFailures}>关闭失败提示</button>}
       {decisionError && <p className="error" role="alert">{decisionError}</p>}
       <div className="upload-task-list">
         {pending.map((item) => <div className="upload-task" key={item.id}><span>{item.name}</span><small className={item.error ? 'error' : ''}>{item.error || `上传中 ${item.progress}%`}</small></div>)}
         {visibleJobs.map((job) => <div className={`upload-task ${job.requiresConfirmation ? 'upload-conflict' : ''}`} key={job.id}><span>{job.fileName}{job.targetTrackId && !job.requiresConfirmation && <small>（替换音频）</small>}</span>{job.requiresConfirmation ? <div><small>已存在“{job.conflictTitle}”，覆盖音频？</small><div className="upload-conflict-actions"><button type="button" disabled={deciding.includes(job.id)} onClick={() => void resolve(job.id, true)}>覆盖</button><button type="button" disabled={deciding.includes(job.id)} onClick={() => void resolve(job.id, false)}>取消</button></div></div> : <small className={job.state === 'failed' ? 'error' : ''}>{labels[job.state]}{job.error ? `：${job.error}` : ''}</small>}</div>)}
       </div>
       </div>
-    </details>}
+    </details></div>, destination)}
   </>
 }
