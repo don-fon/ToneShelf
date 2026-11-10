@@ -22,9 +22,9 @@
 .sort-options{position:absolute;right:0;top:34px;z-index:6;width:180px;padding:5px;background:#fffcf8;border:1px solid #ded6ce;border-radius:8px;box-shadow:0 8px 24px #302c2920;display:grid;gap:2px}
 .sort-options button{border:0;border-radius:5px;background:transparent;text-align:left;padding:9px 10px;color:#6f6760;font-size:13px}
 .sort-options button:hover,.sort-options button[aria-pressed=true]{background:#f4e7dd;color:#a75632}
-.playlist-title{display:flex;align-items:baseline;gap:14px}
-.playlist-title h1{min-width:0;overflow-wrap:anywhere}
-.track-count{flex-shrink:0;color:#8b837b;font-size:14px;white-space:nowrap}
+
+
+
 .upload-input{display:none}
 .upload-tasks{margin:14px 0;border:1px solid #e0dcd5;border-radius:8px;background:#fffcf8;padding:10px 14px}
 .upload-tasks summary{cursor:pointer;font-size:13px;color:#6f6760}
@@ -73,8 +73,8 @@
 .library-pane{display:flex;flex-direction:column;min-height:0;min-width:0}
 .library-pane .hero{flex-shrink:0;flex-wrap:wrap;gap:12px;padding-bottom:16px}
 .library-pane .hero>div{min-width:0;flex:1}
-.library-pane .hero h1{font-size:32px}
-.library-pane .playlist-title{flex-wrap:wrap;gap:4px 12px}
+
+
 .library-pane .upload{flex-shrink:0;padding:10px 14px;white-space:nowrap}
 .list-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 .list-scroll .tracks{margin-top:12px}
@@ -107,7 +107,7 @@ aside nav{min-height:0;overflow:auto;overscroll-behavior:contain}
   .shell>aside header{padding-bottom:10px}
   .music-main,.trash-main{flex:1;height:auto;padding:12px 16px;min-height:0}
   .music-main{gap:12px}
-  .library-pane .hero h1{font-size:28px}
+
   .music-workspace>.lyrics-panel{padding:16px}
 }
 @media(max-width:800px) and (max-height:500px){.shell>aside header{display:none}.shell>aside{padding:6px 12px}.music-main{gap:8px;padding:8px 12px}}
@@ -157,3 +157,5 @@ aside nav{min-height:0;overflow:auto;overscroll-behavior:contain}
 .library-pane .hero>.upload-actions{flex:0 0 auto;max-width:100%;margin-left:auto}.upload-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px}.upload-activity-anchor:empty{display:none}.upload-activity{position:relative;z-index:8}.upload-activity .upload-tasks{position:relative;margin:0;padding:0;border:0;background:transparent}.upload-activity summary{display:flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:7px 10px;border:1px solid #ded6ce;border-radius:8px;background:#fffcf8;color:#9c5c40;list-style:none;white-space:nowrap}.upload-activity summary::-webkit-details-marker{display:none}.upload-activity .upload-task-icon{display:block;flex-shrink:0}.upload-activity summary span{margin:0;color:inherit;font-size:12px}.upload-activity .upload-task-content{position:absolute;right:0;top:calc(100% + 8px);width:min(360px,calc(100vw - 32px));padding:12px;background:#fffcf8;border:1px solid #ded6ce;border-radius:9px;box-shadow:0 6px 20px #0002;color:#6f6760}.upload-activity .upload-task-list{margin:0;max-height:min(280px,40dvh)}.upload-activity .dismiss-upload-errors{display:block;margin:0 0 8px auto;padding:4px 6px;border:0;background:transparent;color:#9c5c40;font-size:12px}.upload-activity.floating{position:fixed;right:16px;bottom:104px}.upload-activity.floating .upload-task-content{top:auto;bottom:calc(100% + 8px)}@media(max-width:800px){.upload-activity.floating{bottom:134px}}
 .upload-actions{position:relative;z-index:8}.upload-actions .upload-activity,.upload-actions .upload-tasks{position:static}
 .now-link{width:100%;min-height:48px;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;text-align:left}.now-meta{min-width:0}.now-link:not(:disabled):hover{color:#b65e39}.now-link:disabled{cursor:default}.now-link:focus-visible{outline:2px solid #d86e43;outline-offset:3px}
+.playlist-toolbar .playlist-actions{margin-top:0;flex-wrap:wrap}
+.playlist-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px;flex-shrink:0}.playlist-toolbar .playlist-actions{grid-column:1/-1}.playlist-toolbar .playlist-transfer{min-height:40px;padding-top:0;margin:0;gap:6px;align-items:center}.playlist-toolbar .upload-actions{margin-left:auto;flex-wrap:nowrap}.playlist-toolbar .upload{padding:10px 14px;font-size:14px;white-space:nowrap}.playlist-toolbar .playlist-transfer>span{flex-basis:100%}@media(max-width:800px){.playlist-toolbar{gap:6px}.playlist-toolbar .playlist-transfer{gap:4px}.playlist-toolbar .playlist-transfer>button{padding:6px;font-size:12px;white-space:nowrap}.playlist-toolbar .upload{padding:10px;font-size:13px}.playlist-toolbar .upload-actions{gap:6px}.playlist-toolbar .upload-task-label{display:none}.playlist-toolbar .upload-activity summary{position:relative;width:36px;padding:0}.playlist-toolbar .upload-activity summary>span{position:absolute;right:-3px;top:-3px;min-width:16px;padding:1px 4px;border-radius:8px;background:#9c5c40;color:white;font-size:10px;text-align:center}}

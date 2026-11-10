@@ -159,7 +159,7 @@ describe('independent playback controls', () => {
     usePlayer.setState({ playlistID: 'list', trackID: null, playing: false, mode: scenario === 'repeat-one' ? 'repeat-one' : 'random' })
     const query = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={query}><App/></QueryClientProvider>)
-    await screen.findByRole('heading', { name: 'Test playlist' })
+    await screen.findByRole('button', { name: /Test playlist/ })
     const toggle = screen.getByRole('button', { name: '播放' }) as HTMLButtonElement
     expect(toggle.disabled).toBe(true)
     fireEvent.click(toggle)
