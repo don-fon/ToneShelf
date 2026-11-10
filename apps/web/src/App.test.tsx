@@ -44,6 +44,42 @@ const renderApp = () => {
 afterEach(() => { cleanup(); usePlayer.setState(usePlayer.getInitialState(), true); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
+  it('opens lyrics from the player title and returns through the current playlist without resetting playback', async () => {
+    vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
+    renderApp()
+    fireEvent.click(await screen.findByRole('group', { name: '歌曲 World is Mine' }))
+    expect(screen.queryByRole('group', { name: '播放视图' })).toBeNull()
+    const recovery = usePlayer.getState().recovery
+    usePlayer.setState({ position: 42 })
+    fireEvent.click(screen.getByRole('button', { name: '查看歌词：World is Mine' }))
+    expect(document.querySelector('.music-workspace')?.getAttribute('data-view')).toBe('lyrics')
+    expect(usePlayer.getState().playing).toBe(true)
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: /默认歌单/ }))
+    expect(document.querySelector('.music-workspace')?.getAttribute('data-view')).toBe('songs')
+    expect(usePlayer.getState().trackID).toBe(track.id)
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(usePlayer.getState().position).toBe(42)
+    expect(usePlayer.getState().recovery).toEqual(recovery)
+  })
+
+  it('opens the selected playlist from lyrics and opens lyrics from the trash view', async () => {
+    vi.mocked(api.playlists).mockResolvedValue([
+      { id: 'default', name: '默认歌单', isDefault: true, tracks: [track] },
+      { id: 'other', name: '其他歌单', isDefault: false, tracks: [track] },
+    ])
+    renderApp()
+    fireEvent.click(await screen.findByRole('group', { name: '歌曲 World is Mine' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看歌词：World is Mine' }))
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: /其他歌单/ }))
+    expect(document.querySelector('.music-workspace')?.getAttribute('data-view')).toBe('songs')
+    expect(screen.getByRole('heading', { name: '其他歌单' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('group', { name: '歌曲 World is Mine' }))
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: /回收站/ }))
+    fireEvent.click(screen.getByRole('button', { name: '查看歌词：World is Mine' }))
+    expect(document.querySelector('.music-workspace')?.getAttribute('data-view')).toBe('lyrics')
+    expect(screen.getByRole('region', { name: '播放歌词' })).toBeTruthy()
+  })
+
   it('plays by clicking the song row and resumes the current song without resetting progress', async () => {
     vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
     renderApp()
