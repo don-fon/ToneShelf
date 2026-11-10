@@ -195,15 +195,17 @@ export function App() {
 
   return <div className="shell">
     <aside>
-      <header><span className="mark">♫</span><div><strong>音乐空间</strong><small>你的私人播放站</small></div></header>
-      <nav>{playlists.map((playlist) => <button className={!showTrash && playlist.id === active?.id ? 'active' : ''} key={playlist.id} onClick={() => { setShowTrash(false); setMobileView('songs'); if (playlist.id !== player.playlistID) player.selectPlaylist(playlist.id) }}><span>{playlist.isDefault ? '♥' : '≡'}</span>{playlist.name}<em>{playlist.tracks.length}</em></button>)}<button className={showTrash ? 'active' : ''} onClick={() => setShowTrash(true)}><span>♻</span>回收站<em>{trash.length}</em></button></nav>
+      <nav>{playlists.map((playlist) => <button className={!showTrash && playlist.id === active?.id ? 'active' : ''} key={playlist.id} onClick={() => { setShowTrash(false); setMobileView('songs'); if (playlist.id !== player.playlistID) player.selectPlaylist(playlist.id) }}><span>{playlist.isDefault ? '♥' : '≡'}</span>{playlist.name}<em>{playlist.tracks.length}</em></button>)}</nav>
       <form className="new-list" onSubmit={(event) => { event.preventDefault(); if (playlistName.trim()) { create.mutate(playlistName.trim()); setPlaylistName('') } }}><input value={playlistName} onChange={(event) => setPlaylistName(event.target.value)} placeholder="新建歌单"/><button>＋</button></form>
+      <div className="sidebar-tools" role="group" aria-label="音乐库工具">
+      <button className={`trash-toggle ${showTrash ? 'active' : ''}`} type="button" aria-label="回收站" aria-pressed={showTrash} title="回收站" onClick={() => { setShowTrash(true); setShowQuota(false); const tasks = document.querySelector<HTMLDetailsElement>('.sidebar-status .upload-tasks'); if (tasks) tasks.open = false }}><svg className="trash-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg><span className="trash-label">回收站</span>{trash.length > 0 && <span className="trash-count">{trash.length}</span>}</button>
       <div className="sidebar-status" onClick={() => setShowQuota(false)}>
         <UploadTasks playlistID={showTrash ? undefined : active?.id}/>
       </div>
       <div className="quota-disclosure" ref={quotaRef} data-open={showQuota} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowQuota(false) }} onKeyDown={(event) => { if (event.key === 'Escape') { setShowQuota(false); quotaRef.current?.querySelector('button')?.focus() } }}>
         <button className="quota-toggle" type="button" aria-label="存储空间" title="存储空间" aria-expanded={showQuota} aria-controls="storage-quota" onClick={() => { setShowQuota(!showQuota); const tasks = document.querySelector<HTMLDetailsElement>('.sidebar-status .upload-tasks'); if (tasks) tasks.open = false }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 14h18M16 17h2"/></svg></button>
         <div id="storage-quota" className="quota" title={quota?.reservedBytes ? `含处理中预留 ${bytes(quota.reservedBytes)}` : undefined}><b>已用 {bytes((quota?.usedBytes ?? 0) + (quota?.reservedBytes ?? 0))} / {bytes(quota?.limitBytes)}</b><i><u style={{ width: `${Math.min(100, (((quota?.usedBytes ?? 0) + (quota?.reservedBytes ?? 0)) / (quota?.limitBytes || 1)) * 100)}%` }}/></i></div>
+      </div>
       </div>
     </aside>
 

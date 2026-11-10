@@ -44,6 +44,20 @@ const renderApp = () => {
 afterEach(() => { cleanup(); usePlayer.setState(usePlayer.getInitialState(), true); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.removeTrack).mockReset().mockResolvedValue({ trackDeleted: true }); vi.mocked(api.playlists).mockReset().mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }]) })
 
 describe('music library lifecycle', () => {
+  it('groups trash, uploads and storage apart from playlist navigation without branding', async () => {
+    vi.mocked(api.jobs).mockResolvedValueOnce([{ id: 'upload', state: 'succeeded', kind: 'upload', fileName: 'test.mp3', createdAt: '', reservedBytes: 0 }])
+    renderApp()
+    const tools = await screen.findByRole('group', { name: '音乐库工具' })
+    const trash = within(tools).getByRole('button', { name: '回收站' })
+    expect(within(tools).getByRole('button', { name: '存储空间' })).toBeTruthy()
+    expect(await within(tools).findByText('上传任务')).toBeTruthy()
+    expect(within(screen.getByRole('navigation')).queryByRole('button', { name: '回收站' })).toBeNull()
+    expect(screen.queryByText('音乐空间')).toBeNull()
+    expect(screen.queryByText('你的私人播放站')).toBeNull()
+    fireEvent.click(trash)
+    expect(trash.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('heading', { name: '回收站' })).toBeTruthy()
+  })
   it('opens lyrics from the player title and returns through the current playlist without resetting playback', async () => {
     vi.mocked(api.playlists).mockResolvedValue([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [track] }])
     renderApp()
@@ -74,7 +88,7 @@ describe('music library lifecycle', () => {
     expect(document.querySelector('.music-workspace')?.getAttribute('data-view')).toBe('songs')
     expect(screen.getByRole('heading', { name: '其他歌单' })).toBeTruthy()
     fireEvent.click(screen.getByRole('group', { name: '歌曲 World is Mine' }))
-    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: /回收站/ }))
+    fireEvent.click(screen.getByRole('button', { name: '回收站' }))
     fireEvent.click(screen.getByRole('button', { name: '查看歌词：World is Mine' }))
     expect(document.querySelector('.music-workspace')?.getAttribute('data-view')).toBe('lyrics')
     expect(screen.getByRole('region', { name: '播放歌词' })).toBeTruthy()
