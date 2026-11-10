@@ -60,6 +60,64 @@ async function setup(playing = true) {
 }
 
 describe('independent playback controls', () => {
+  it('toggles playback with Space without seeking or reloading the current audio', async () => {
+    await setup()
+    fireEvent.keyDown(document.body, { key: ' ' })
+    expect(usePlayer.getState().playing).toBe(false)
+    expect(usePlayer.getState().position).toBe(48.8)
+    fireEvent.keyDown(document.body, { key: ' ' })
+    await waitFor(() => expect(audio.play).toHaveBeenCalledOnce())
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(audio.seek).not.toHaveBeenCalled()
+    expect(audio.load).not.toHaveBeenCalled()
+  })
+
+  it('seeks from the live audio position and clamps shortcuts to the song playback interval', async () => {
+    const query = await setup(false)
+    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, playbackEndSeconds: 52 }] }]) })
+    await waitFor(() => expect(document.querySelector('.controls input')?.getAttribute('max')).toBe('52'))
+    audio.element!.currentTime = 48.8
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' })
+    expect(audio.seek).toHaveBeenLastCalledWith(52)
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft' })
+    expect(audio.seek).toHaveBeenLastCalledWith(47)
+    audio.element!.currentTime = 6
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft' })
+    expect(audio.seek).toHaveBeenLastCalledWith(5)
+    expect(usePlayer.getState().playing).toBe(false)
+    expect(audio.load).not.toHaveBeenCalled()
+  })
+
+  it('changes and restores master volume with arrows and M without altering progress', async () => {
+    await setup()
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' })
+    expect(usePlayer.getState().masterVolume).toBe(.95)
+    fireEvent.keyDown(document.body, { key: 'm' })
+    expect(usePlayer.getState().masterVolume).toBe(0)
+    fireEvent.keyDown(document.body, { key: 'm' })
+    expect(usePlayer.getState().masterVolume).toBe(.95)
+    fireEvent.keyDown(document.body, { key: 'ArrowUp' })
+    fireEvent.keyDown(document.body, { key: 'ArrowUp' })
+    expect(usePlayer.getState().masterVolume).toBe(1)
+    expect(audio.seek).not.toHaveBeenCalled()
+    expect(audio.load).not.toHaveBeenCalled()
+    expect(audio.element!.currentTime).toBe(48.8)
+  })
+
+  it('uses N for the existing next-song policy and ignores keys while help is open', async () => {
+    const query = await setup(false)
+    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'second', title: 'Second', audioUrl: '/second', playbackStartSeconds: 7 }] }]) })
+    await screen.findByRole('button', { name: '设置 Second' })
+    fireEvent.keyDown(document.body, { key: 'n' })
+    expect(usePlayer.getState().trackID).toBe('second')
+    fireEvent.keyDown(document.body, { key: '?', shiftKey: true })
+    expect(screen.getByRole('dialog', { name: '快捷键' })).toBeTruthy()
+    audio.seek.mockClear()
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' })
+    expect(audio.seek).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '关闭快捷键说明' }))
+    expect(screen.queryByRole('dialog', { name: '快捷键' })).toBeNull()
+  })
   it('updates artwork without seeking, pausing or reloading audio', async () => {
     const query = await setup()
     act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, coverUrl: '/api/tracks/song/cover?v=1&c=2' }] }]) })
@@ -163,6 +221,7 @@ describe('independent playback controls', () => {
     const toggle = screen.getByRole('button', { name: '播放' }) as HTMLButtonElement
     expect(toggle.disabled).toBe(true)
     fireEvent.click(toggle)
+    fireEvent.keyDown(document.body, { key: ' ' })
     expect(audio.play).not.toHaveBeenCalled()
     expect(usePlayer.getState().trackID).toBeNull()
   })

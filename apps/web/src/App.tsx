@@ -10,6 +10,8 @@ import { TrackCover } from './TrackCover'
 import { LyricsView } from './LyricsView'
 import { LyricsEditor } from './LyricsEditor'
 import { WebAudioEngine } from './platform/audio'
+import { usePlaybackShortcuts } from './platform/keyboard'
+import { ShortcutHelp } from './ShortcutHelp'
 import { watchSessionLifecycle } from './platform/session'
 import { flushPlayerSession, usePlayer } from './player-store'
 
@@ -41,6 +43,8 @@ export function App() {
   const [showTrash, setShowTrash] = useState(false)
   const [mobileView, setMobileView] = useState<'songs' | 'lyrics'>('songs')
   const [showQuota, setShowQuota] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const beforeMute = useRef(1)
   const [uploadAnchor, setUploadAnchor] = useState<HTMLDivElement | null>(null)
   const quotaRef = useRef<HTMLDivElement>(null)
   const [sortBy, setSortBy] = useState<'uploadedAt' | 'fileName'>('uploadedAt')
@@ -152,6 +156,20 @@ export function App() {
     if (selected) playTrack(selected)
   }
 
+  const togglePlayback = () => { if (current) player.setPlaying(!player.playing); else if (player.mode === 'random') next() }
+  usePlaybackShortcuts({
+    enabled: !isLoading && !error,
+    togglePlayback, next,
+    seekBy: (delta) => { if (current) seek(Math.max(current.playbackStartSeconds, Math.min(current.playbackEndSeconds ?? current.durationSeconds, engine.position() + delta))) },
+    adjustVolume: (delta) => player.setMasterVolume(Math.max(0, Math.min(1, Math.round((usePlayer.getState().masterVolume + delta) * 100) / 100))),
+    toggleMute: () => {
+      const volume = usePlayer.getState().masterVolume
+      if (volume > 0) { beforeMute.current = volume; player.setMasterVolume(0) }
+      else player.setMasterVolume(beforeMute.current)
+    },
+    showHelp: () => setShowShortcuts(true),
+  })
+
   useEffect(() => {
     const audio = engine.element()
     const onTime = () => {
@@ -199,6 +217,7 @@ export function App() {
       <nav>{playlists.map((playlist) => <button className={!showTrash && playlist.id === active?.id ? 'active' : ''} key={playlist.id} onClick={() => { setShowTrash(false); setMobileView('songs'); if (playlist.id !== player.playlistID) player.selectPlaylist(playlist.id) }}><span>{playlist.isDefault ? '♥' : '≡'}</span>{playlist.name}<em>{playlist.tracks.length}</em></button>)}</nav>
       <form className="new-list" onSubmit={(event) => { event.preventDefault(); if (playlistName.trim()) { create.mutate(playlistName.trim()); setPlaylistName('') } }}><input value={playlistName} onChange={(event) => setPlaylistName(event.target.value)} placeholder="新建歌单"/><button>＋</button></form>
       <div className="sidebar-tools" role="group" aria-label="音乐库工具">
+      <button className="shortcuts-toggle" type="button" aria-label="快捷键" title="快捷键（?）" onClick={() => setShowShortcuts(true)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 15h10"/></svg><span>快捷键</span></button>
       <button className={`trash-toggle ${showTrash ? 'active' : ''}`} type="button" aria-label="回收站" aria-pressed={showTrash} title="回收站" onClick={() => { setShowTrash(true); setShowQuota(false); }}><svg className="trash-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg><span className="trash-label">回收站</span>{trash.length > 0 && <span className="trash-count">{trash.length}</span>}</button>
       <div className="quota-disclosure" ref={quotaRef} data-open={showQuota} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowQuota(false) }} onKeyDown={(event) => { if (event.key === 'Escape') { setShowQuota(false); quotaRef.current?.querySelector('button')?.focus() } }}>
         <button className="quota-toggle" type="button" aria-label="存储空间" title="存储空间" aria-expanded={showQuota} aria-controls="storage-quota" onClick={() => { setShowQuota(!showQuota); }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 14h18M16 17h2"/></svg></button>
@@ -257,6 +276,7 @@ export function App() {
       <div className="actions"><button type="button" disabled={save.isPending} onClick={() => { settings.reset(); setEditing(null) }}>取消</button><button className="primary" disabled={save.isPending || settings.coverInvalid}>{save.isPending ? '保存中…' : '保存'}</button></div>
     </form></div>}
 
-    <footer className="player"><button className="now now-link" type="button" disabled={!current} aria-label={current ? `查看歌词：${current.title}` : '选择一首音乐'} onClick={() => { setShowTrash(false); setMobileView('lyrics') }}><TrackCover src={current?.coverUrl}/><span className="now-meta"><strong>{current?.title ?? '选择一首音乐'}</strong><small>{current?.artist || '尚未播放'}</small></span></button><div className="controls"><div><button onClick={() => player.setMode(player.mode === 'random' ? 'repeat-one' : 'random')}>{player.mode === 'random' ? '⤨' : '↻'}</button><button className="main" aria-label={player.playing ? '暂停' : '播放'} disabled={!current && (player.mode !== 'random' || !active?.tracks.length)} onClick={() => { if (current) player.setPlaying(!player.playing); else if (player.mode === 'random') next() }}>{player.playing ? 'Ⅱ' : '▶'}</button><button disabled={!active?.tracks.length} onClick={next}>▶|</button></div><label><span>{time(position)}</span><input type="range" min={current?.playbackStartSeconds ?? 0} max={current?.playbackEndSeconds ?? current?.durationSeconds ?? 1} step="0.1" value={position} onChange={(event) => { seek(Number(event.target.value)) }}/><span>{time(current?.playbackEndSeconds ?? current?.durationSeconds)}</span></label></div><label className="volume">♪<input type="range" min="0" max="1" step="0.01" value={player.masterVolume} onChange={(event) => player.setMasterVolume(Number(event.target.value))}/></label></footer>
+    {showShortcuts && <ShortcutHelp onClose={() => setShowShortcuts(false)}/>}
+    <footer className="player"><button className="now now-link" type="button" disabled={!current} aria-label={current ? `查看歌词：${current.title}` : '选择一首音乐'} onClick={() => { setShowTrash(false); setMobileView('lyrics') }}><TrackCover src={current?.coverUrl}/><span className="now-meta"><strong>{current?.title ?? '选择一首音乐'}</strong><small>{current?.artist || '尚未播放'}</small></span></button><div className="controls"><div><button onClick={() => player.setMode(player.mode === 'random' ? 'repeat-one' : 'random')}>{player.mode === 'random' ? '⤨' : '↻'}</button><button className="main" aria-label={player.playing ? '暂停' : '播放'} disabled={!current && (player.mode !== 'random' || !active?.tracks.length)} onClick={togglePlayback}>{player.playing ? 'Ⅱ' : '▶'}</button><button disabled={!active?.tracks.length} onClick={next}>▶|</button></div><label><span>{time(position)}</span><input type="range" min={current?.playbackStartSeconds ?? 0} max={current?.playbackEndSeconds ?? current?.durationSeconds ?? 1} step="0.1" value={position} onChange={(event) => { seek(Number(event.target.value)) }}/><span>{time(current?.playbackEndSeconds ?? current?.durationSeconds)}</span></label></div><label className="volume">♪<input type="range" min="0" max="1" step="0.01" value={player.masterVolume} onChange={(event) => player.setMasterVolume(Number(event.target.value))}/></label></footer>
   </div>
 }
