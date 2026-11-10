@@ -60,6 +60,36 @@ async function setup(playing = true) {
 }
 
 describe('independent playback controls', () => {
+  it('toggles playback with Space on the focused song row without restarting it or double handling the key', async () => {
+    await setup()
+    const row = screen.getByRole('group', { name: '歌曲 Playback test' })
+    row.focus()
+    const recovery = usePlayer.getState().recovery
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(usePlayer.getState().playing).toBe(false)
+    expect(usePlayer.getState().position).toBe(48.8)
+    expect(audio.pause).toHaveBeenCalledOnce()
+    fireEvent.keyDown(row, { key: ' ', repeat: true })
+    expect(usePlayer.getState().playing).toBe(false)
+    fireEvent.keyDown(row, { key: ' ' })
+    await waitFor(() => expect(audio.play).toHaveBeenCalledOnce())
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(usePlayer.getState().recovery).toEqual(recovery)
+    expect(audio.seek).not.toHaveBeenCalled()
+    expect(audio.load).not.toHaveBeenCalled()
+  })
+
+  it('uses Space to pause the current song even when another song row has focus', async () => {
+    const query = await setup()
+    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'second', title: 'Second', audioUrl: '/second' }] }]) })
+    const row = await screen.findByRole('group', { name: '歌曲 Second' })
+    row.focus()
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(usePlayer.getState().playing).toBe(false)
+    expect(usePlayer.getState().trackID).toBe(track.id)
+    expect(audio.load).not.toHaveBeenCalled()
+  })
+
   it('toggles playback with Space without seeking or reloading the current audio', async () => {
     await setup()
     fireEvent.keyDown(document.body, { key: ' ' })
