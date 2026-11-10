@@ -436,23 +436,24 @@ describe('music library lifecycle', () => {
     await waitFor(() => expect(api.updateTrack).toHaveBeenCalledWith(expect.objectContaining({ title: '新名称', artist: '新歌手' })))
   })
 
-  it('switches displayed filename order without manual move controls', async () => {
+  it('sorts by song title rather than filename without manual move controls', async () => {
     vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [
-      { ...track, id: 'ten', title: 'Ten', fileName: '10.mp3', uploadedAt: '2026-11-09T00:00:00Z' },
-      { ...track, id: 'two', title: 'Two', fileName: '2.mp3', uploadedAt: '2026-11-08T00:00:00Z' },
+      { ...track, id: 'ten', title: '歌曲10', fileName: '1.mp3', uploadedAt: '2026-11-09T00:00:00Z' },
+      { ...track, id: 'two', title: '歌曲2', fileName: '99.mp3', uploadedAt: '2026-11-08T00:00:00Z' },
     ] }])
     renderApp()
-    await screen.findByText('Ten')
+    await screen.findByText('歌曲10')
     const titles = () => Array.from(document.querySelectorAll('.track strong')).map((element) => element.textContent)
-    expect(titles()).toEqual(['Ten', 'Two'])
+    expect(titles()).toEqual(['歌曲10', '歌曲2'])
     expect(screen.queryByRole('group', { name: '排序选项' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '排序' }))
-    fireEvent.click(screen.getByRole('button', { name: '文件名 · 正序' }))
+    expect(screen.queryByRole('button', { name: /文件名/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '歌曲名 · 正序' }))
     expect(screen.queryByRole('group', { name: '排序选项' })).toBeNull()
-    expect(titles()).toEqual(['Two', 'Ten'])
+    expect(titles()).toEqual(['歌曲2', '歌曲10'])
     fireEvent.click(screen.getByRole('button', { name: '排序' }))
-    fireEvent.click(screen.getByRole('button', { name: '文件名 · 逆序' }))
-    expect(titles()).toEqual(['Ten', 'Two'])
+    fireEvent.click(screen.getByRole('button', { name: '歌曲名 · 逆序' }))
+    expect(titles()).toEqual(['歌曲10', '歌曲2'])
     expect(screen.queryByLabelText('上移 Ten')).toBeNull()
   })
 

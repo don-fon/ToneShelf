@@ -8,16 +8,18 @@ const track = (id: string, weight = 1): Track => ({
   playbackEndSeconds: null, volumeRatio: 0.8, lyrics: '', audioUrl: `/audio/${id}`, audioVersion: 1, fileName: `${id}.mp3`, uploadedAt: '2026-11-08T00:00:00Z',
 })
 describe('weighted random policy', () => {
-  it('sorts by upload instant or natural filename in both directions without mutating input', () => {
+  it('sorts by upload instant or current song title instead of filename without mutating input', () => {
     const items = [
-      { ...track('a'), fileName: '10.mp3', uploadedAt: '2026-11-08T10:00:00+08:00' },
-      { ...track('b'), fileName: '2.mp3', uploadedAt: '2026-11-08T01:00:00Z' },
+      { ...track('a'), title: '歌曲10', fileName: '1.mp3', uploadedAt: '2026-11-08T10:00:00+08:00' },
+      { ...track('b'), title: '歌曲2', fileName: '99.mp3', uploadedAt: '2026-11-08T01:00:00Z' },
     ]
-    expect(sortTracks(items, 'fileName', 'asc').map((item) => item.id)).toEqual(['b', 'a'])
-    expect(sortTracks(items, 'fileName', 'desc').map((item) => item.id)).toEqual(['a', 'b'])
+    expect(sortTracks(items, 'title', 'asc').map((item) => item.id)).toEqual(['b', 'a'])
+    expect(sortTracks(items, 'title', 'desc').map((item) => item.id)).toEqual(['a', 'b'])
     expect(sortTracks(items, 'uploadedAt', 'asc').map((item) => item.id)).toEqual(['b', 'a'])
     expect(sortTracks(items, 'uploadedAt', 'desc').map((item) => item.id)).toEqual(['a', 'b'])
     expect(items.map((item) => item.id)).toEqual(['a', 'b'])
+    const renamed = items.map((item) => item.id === 'a' ? { ...item, title: '歌曲1' } : item)
+    expect(sortTracks(renamed, 'title', 'asc').map((item) => item.id)).toEqual(['a', 'b'])
   })
   it('never immediately repeats when another track exists', () => {
     expect(selectNext([track('a'), track('b')], 'a', { a: 0 }, () => 0)?.id).toBe('b')
