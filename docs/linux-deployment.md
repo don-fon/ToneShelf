@@ -22,6 +22,32 @@ Nginx 转发到回环地址，账号校验由 Go 服务统一执行，音频 Ran
 
 仅在明确选择未加密公网访问后使用该 HTTP 模板。它需要安全组放行 TCP 80，不能加密账号和会话，浏览器也不能通过这个 HTTP 地址使用悬浮歌词；使用 HTTPS 时，应单独配置证书与 HTTPS 站点。保持应用后端端口只在回环地址监听。
 
+### Let's Encrypt IP 证书
+
+公网 IPv4 地址可直接申请 Let's Encrypt 的 `shortlived` 证书，无需域名，有效期约 6 天。使用 Certbot 5.4 或更新版本的 webroot 模式，签发和续期都不停止 Nginx；系统软件源版本不满足时，可按 [Certbot 官方 pip 安装说明](https://certbot.eff.org/instructions?os=pip&ws=other) 安装到独立 `/opt/certbot` 环境。功能及版本要求见 [Let's Encrypt 官方说明](https://letsencrypt.org/2026/03/11/shorter-certs-certbot.html)。
+
+1. 在 HTTP 站点中先加入 [HTTPS 模板](../scripts/deploy/nginx-https.conf) 中的 `/.well-known/acme-challenge/` location，将 `/var/lib/letsencrypt` 及其校验子目录设为 Nginx 可读。安全组保持 TCP 80 可达，备份配置并通过 `nginx -t` 后重载；不要在证书签发前启用引用证书文件的 443 站点。
+2. 将下面的 `SERVER_IP` 换成服务器公网 IPv4 地址，先测试，再正式签发。命令使用无联系邮箱模式，证书及 ACME 私钥仅保留在服务器，不提交 Git。
+
+```sh
+sudo /opt/certbot/bin/certbot certonly --dry-run --non-interactive --agree-tos --register-unsafely-without-email --required-profile shortlived --webroot --webroot-path /var/lib/letsencrypt --ip-address SERVER_IP --cert-name music-player-ip
+sudo /opt/certbot/bin/certbot certonly --non-interactive --agree-tos --register-unsafely-without-email --required-profile shortlived --webroot --webroot-path /var/lib/letsencrypt --ip-address SERVER_IP --cert-name music-player-ip
+```
+
+3. 用 HTTPS 模板替换该播放器站点配置，将其中全部 `SERVER_IP` 替换为证书覆盖的 IP，放行 TCP 443，检查配置后重载。HTTP 校验路径保持直出，其他 HTTP 请求以 308 跳转到固定 IP 的 HTTPS 地址；后端仍为 `127.0.0.1:8080`。代理传递 HTTPS 协议，应用据此设置 Secure 会话 Cookie。HTTP 与 HTTPS 的浏览器播放存储分开，切换后播放进度不会自动搬迁。
+4. 将 [续期服务](../scripts/deploy/music-player-certbot-renew.service) 和 [定时器](../scripts/deploy/music-player-certbot-renew.timer) 放到 `/etc/systemd/system/`；将 [Nginx 重载脚本](../scripts/deploy/certbot-reload-nginx.sh) 安装为 `/etc/letsencrypt/renewal-hooks/deploy/music-player-reload-nginx`，权限 `0755`。这些文件由 root 管理。定时器每天检查两次，Certbot 决定何时实际续期，成功后先检查 Nginx 配置再平滑重载。
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now music-player-certbot-renew.timer
+sudo /opt/certbot/bin/certbot renew --cert-name music-player-ip --dry-run --run-deploy-hooks --no-random-sleep-on-renew
+sudo systemctl list-timers music-player-certbot-renew.timer --no-pager
+sudo journalctl -u music-player-certbot-renew.service -n 100 --no-pager
+sudo /opt/certbot/bin/certbot certificates
+```
+
+验收应包含公网证书链及 IP 匹配、HTTP 跳转、匿名 API 返回 401、Cookie 的 Secure 标志、续期模拟及重载钩子；不能仅检查 443 端口打开。定期检查续期任务日志与证书剩余有效期，维护 Certbot 环境更新。公网 IP 更换后需重新签发并更新 Nginx 跳转地址。悬浮歌词仍取决于浏览器是否支持 Document Picture-in-Picture。
+
 ## 服务管理
 
 ```sh

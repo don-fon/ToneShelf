@@ -621,7 +621,7 @@ Windows x64、Linux x64 和 Linux ARM64 必须分别准备匹配架构的 FFmpeg
 
 发布后只启动一个 Go 服务程序，由它同时提供网页、API 和音频。生产环境不要求安装 Go、Node.js，也不运行 Vite。网页资源嵌入服务程序，但 FFmpeg 仍作为平台相关的外部工具随包分发。
 
-以上为完整发布目标。当前 Linux 部署使用独立的 `web/` 构建目录，显式通过 `webDir` 交给 Go 服务，FFmpeg/ffprobe 由系统软件包提供；已提供 systemd 与 HTTP Nginx 示例，具体目录、迁移验证、备份及更新流程见 [Linux 部署与维护](linux-deployment.md)。
+以上为完整发布目标。当前 Linux 部署使用独立的 `web/` 构建目录，显式通过 `webDir` 交给 Go 服务，FFmpeg/ffprobe 由系统软件包提供；已提供 systemd、HTTP/HTTPS Nginx 及 Let's Encrypt IP 证书续期示例，具体目录、迁移验证、备份及更新流程见 [Linux 部署与维护](linux-deployment.md)。
 
 Linux 发布必须：
 
