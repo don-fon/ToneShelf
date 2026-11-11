@@ -116,6 +116,7 @@ npm run verify
 
 - [产品需求规格](docs/product-requirements.md)
 - [初步技术设计](docs/technical-design.md)
+- [Linux 部署与维护](docs/linux-deployment.md)
 
 ## 初版范围摘要
 
