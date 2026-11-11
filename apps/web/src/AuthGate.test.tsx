@@ -70,12 +70,17 @@ it('keeps the session visible if logout fails and does not interpret network err
   await waitFor(() => expect(client.getQueryCache().getAll()).toHaveLength(1))
 })
 
-it('rechecks identity on focus and clears private queries before switching users', async () => {
+it('does not recheck identity when returning to the page', async () => {
   vi.mocked(api.currentUser).mockResolvedValue(first)
   const client = setup()
   await screen.findByText('受保护音乐库')
   vi.mocked(api.currentUser).mockResolvedValue({ id: 'second', isDefault: false })
-  fireEvent.focus(window)
-  await waitFor(() => expect(initializePlayerSession).toHaveBeenLastCalledWith({ id: 'second', isDefault: false }))
-  expect(client.getQueryCache().getAll()).toHaveLength(0)
+  await act(async () => {
+    fireEvent.focus(window)
+    fireEvent(document, new Event('visibilitychange'))
+  })
+  expect(api.currentUser).toHaveBeenCalledTimes(1)
+  expect(initializePlayerSession).toHaveBeenCalledTimes(1)
+  expect(initializePlayerSession).toHaveBeenLastCalledWith(first)
+  expect(client.getQueryCache().getAll()).toHaveLength(1)
 })

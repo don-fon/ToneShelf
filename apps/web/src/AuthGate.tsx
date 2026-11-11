@@ -38,19 +38,6 @@ export function AuthGate() {
     }).finally(() => { if (active) setChecking(false) })
     return () => { active = false; generation.current++; stopPlayerSession.current?.(); stopPlayerSession.current = undefined }
   }, [accept])
-  useEffect(() => {
-    if (!user) return
-    let active = true
-    const check = () => {
-      if (document.visibilityState === 'hidden') return
-      const version = generation.current
-      void api.currentUser().then((value) => {
-        if (active && generation.current === version && value.id !== user.id) { clear(); accept(value) }
-      }).catch(() => {})
-    }
-    window.addEventListener('focus', check); document.addEventListener('visibilitychange', check)
-    return () => { active = false; window.removeEventListener('focus', check); document.removeEventListener('visibilitychange', check) }
-  }, [user, clear, accept])
   const login = async () => {
     if (busy || !account) return
     setBusy(true); setError('')
