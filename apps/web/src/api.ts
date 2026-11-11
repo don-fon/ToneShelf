@@ -2,19 +2,28 @@ import type { CurrentUser, LyricsSearchResult, Playlist, Quota, Track, UploadJob
 
 import { uploadFile } from './platform/upload'
 import { createUploadKey } from './platform/upload-session'
+import { authGeneration, notifyAuthExpired } from './platform/auth-events'
+
+export class APIError extends Error {
+  constructor(message: string, readonly status: number) { super(message) }
+}
 
 type PlaylistPayload = Omit<Playlist, 'tracks'> & { tracks: Track[] | null }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const generation = authGeneration()
   const response = await fetch(url, init)
   if (!response.ok) {
+    if (response.status === 401) notifyAuthExpired(generation)
     const body = await response.json().catch(() => ({ error: response.statusText }))
-    throw new Error(body.error || response.statusText)
+    throw new APIError(body.error || response.statusText, response.status)
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 export const api = {
+  login: (account: string) => request<CurrentUser>('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account }) }),
+  logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
   currentUser: () => request<CurrentUser>('/api/current-user'),
   playlists: async () => {
     const playlists = await request<PlaylistPayload[] | null>('/api/playlists')

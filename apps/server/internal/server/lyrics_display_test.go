@@ -22,7 +22,7 @@ func TestLyricsDisplayAPIValidatesAndReturnsSavedChoice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s}
+	api := &API{ResolveUser: testUserResolver, Store: s}
 	handler := api.Handler()
 	for _, test := range []struct {
 		layout string

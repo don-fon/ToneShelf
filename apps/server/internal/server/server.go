@@ -34,37 +34,45 @@ type API struct {
 	ResolveUser UserResolver
 
 	maintenanceMu sync.Mutex
+	authMu        sync.Mutex
+	loginWindow   time.Time
+	loginCount    int
+	activeLogins  int
 }
 
 func (a *API) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, middleware.Timeout(30*time.Minute))
-	r.Use(a.withCurrentUser)
+	r.Use(middleware.RequestID, middleware.Recoverer, middleware.Timeout(30*time.Minute), sameOriginWrites)
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	r.Get("/api/current-user", a.currentUser)
-	r.Get("/api/playlists", a.playlists)
-	r.Post("/api/playlists", a.createPlaylist)
-	r.Patch("/api/playlists/{playlistID}", a.renamePlaylist)
-	r.Delete("/api/playlists/{playlistID}", a.deletePlaylist)
-	r.Post("/api/playlists/{playlistID}/tracks/{trackID}", a.addTrack)
-	r.Post("/api/playlists/{playlistID}/tracks/{trackID}/move", a.moveTrack)
-	r.Delete("/api/playlists/{playlistID}/tracks/{trackID}", a.removeTrack)
-	r.Get("/api/jobs", a.jobs)
-	r.Post("/api/jobs/{jobID}/resolve", a.resolveUpload)
-	r.Post("/api/tracks", a.upload)
-	r.Post("/api/uploads/check", func(w http.ResponseWriter, r *http.Request) { a.receiveJob(w, r, "", true) })
-	r.Patch("/api/tracks/{trackID}", a.updateTrack)
-	r.Delete("/api/tracks/{trackID}", a.deleteTrack)
-	r.Put("/api/tracks/{trackID}/audio", a.replaceAudio)
-	r.Post("/api/tracks/{trackID}/restore", a.restoreTrack)
-	r.Get("/api/trash", a.trash)
-	r.Get("/api/tracks/{trackID}/lyrics/search", a.searchLyrics)
-	r.Get("/api/tracks/{trackID}/audio", a.audio)
-	r.Get("/api/tracks/{trackID}/cover", a.cover)
-	r.Post("/api/tracks/{trackID}/cover", a.uploadCover)
-	r.Get("/api/quota", a.quota)
+	r.Post("/api/auth/login", a.login)
+	r.Post("/api/auth/logout", a.logout)
+	r.Group(func(r chi.Router) {
+		r.Use(a.withCurrentUser)
+		r.Get("/api/current-user", a.currentUser)
+		r.Get("/api/playlists", a.playlists)
+		r.Post("/api/playlists", a.createPlaylist)
+		r.Patch("/api/playlists/{playlistID}", a.renamePlaylist)
+		r.Delete("/api/playlists/{playlistID}", a.deletePlaylist)
+		r.Post("/api/playlists/{playlistID}/tracks/{trackID}", a.addTrack)
+		r.Post("/api/playlists/{playlistID}/tracks/{trackID}/move", a.moveTrack)
+		r.Delete("/api/playlists/{playlistID}/tracks/{trackID}", a.removeTrack)
+		r.Get("/api/jobs", a.jobs)
+		r.Post("/api/jobs/{jobID}/resolve", a.resolveUpload)
+		r.Post("/api/tracks", a.upload)
+		r.Post("/api/uploads/check", func(w http.ResponseWriter, r *http.Request) { a.receiveJob(w, r, "", true) })
+		r.Patch("/api/tracks/{trackID}", a.updateTrack)
+		r.Delete("/api/tracks/{trackID}", a.deleteTrack)
+		r.Put("/api/tracks/{trackID}/audio", a.replaceAudio)
+		r.Post("/api/tracks/{trackID}/restore", a.restoreTrack)
+		r.Get("/api/trash", a.trash)
+		r.Get("/api/tracks/{trackID}/lyrics/search", a.searchLyrics)
+		r.Get("/api/tracks/{trackID}/audio", a.audio)
+		r.Get("/api/tracks/{trackID}/cover", a.cover)
+		r.Post("/api/tracks/{trackID}/cover", a.uploadCover)
+		r.Get("/api/quota", a.quota)
+	})
 	if a.WebDir != "" {
 		r.Handle("/*", spaHandler(a.WebDir))
 	}
@@ -282,7 +290,7 @@ func (a *API) audio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("Cache-Control", "private, no-cache")
 	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), f)
 }
 

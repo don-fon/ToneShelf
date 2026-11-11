@@ -22,6 +22,7 @@ vi.mock('./platform/audio', () => ({ WebAudioEngine: class {
   setVolume(value: number) { audio.volume(value) }
   play() { return audio.play() }
   pause() { audio.pause() }
+  unload() { audio.pause() }
   position() { return audio.element!.currentTime }
   element() { return audio.element! }
 } }))

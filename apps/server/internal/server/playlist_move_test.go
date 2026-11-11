@@ -23,7 +23,7 @@ func TestMoveTrackEndpoint(t *testing.T) {
 	if _, err = s.InsertTrack(ctx, store.NewTrack{ID: "song", Title: "Song", OriginalPath: "original", PlayablePath: "playable", SizeBytes: 1, DurationSeconds: 10}); err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s}
+	api := &API{ResolveUser: testUserResolver, Store: s}
 	for attempt := 0; attempt < 2; attempt++ {
 		response := httptest.NewRecorder()
 		api.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/playlists/"+store.DefaultPlaylistID+"/tracks/song/move", strings.NewReader(`{"targetPlaylistId":"target"}`)))

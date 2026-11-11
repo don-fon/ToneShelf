@@ -28,7 +28,7 @@ func (a *API) cover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("Cache-Control", "private, no-cache")
 	http.ServeContent(w, r, "cover.jpg", info.ModTime(), file)
 }
 

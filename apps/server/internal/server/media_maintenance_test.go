@@ -57,7 +57,7 @@ func legacyAudioFixture(t *testing.T, format string) (*API, store.Track, string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root)}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root)}
 	t.Cleanup(func() { _ = api.Store.Close() })
 	track, err := s.InsertTrack(ctx, store.NewTrack{ID: "legacy", Title: "kept", Artist: "artist", FileName: "legacy.flac", OriginalPath: source, PlayablePath: output, ContentType: "audio/mpeg", DurationSeconds: 4, SizeBytes: sourceInfo.Size() + outputInfo.Size()})
 	if err != nil {

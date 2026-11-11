@@ -21,7 +21,7 @@ func BenchmarkUpload77MiB(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.Cleanup(func() { _ = s.Close() })
-	api := &API{Store: s, Media: media.New(root)}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root)}
 	server := httptest.NewServer(api.Handler())
 	defer server.Close()
 	const size = 77 << 20

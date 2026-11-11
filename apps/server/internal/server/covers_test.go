@@ -30,7 +30,7 @@ func TestCoverAccessReplacementAndTrashLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root)}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root)}
 	get := func(id string, want int) {
 		t.Helper()
 		response := httptest.NewRecorder()
@@ -117,7 +117,7 @@ func TestCoverRecoveryNeverDeletesOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	api := &API{Store: s, Media: media.New(root)}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root)}
 	if err = api.RecoverJobs(ctx); err != nil {
 		t.Fatal(err)
 	}

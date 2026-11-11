@@ -22,6 +22,15 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "account" {
+		if err := runAccounts(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			if !errors.Is(err, flag.ErrHelp) {
+				slog.Error("account administration failed", "error", err)
+				os.Exit(1)
+			}
+		}
+		return
+	}
 	cfg, err := config.Load(os.Args[1:])
 	if errors.Is(err, flag.ErrHelp) {
 		return

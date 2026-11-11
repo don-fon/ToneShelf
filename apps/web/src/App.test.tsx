@@ -33,7 +33,7 @@ vi.mock('./api', () => ({ api: {
 
 vi.mock('./platform/audio', () => ({ WebAudioEngine: class {
   private readonly audio = document.createElement('audio')
-  load() {} play() { return Promise.resolve() } pause() {} seek() {} setVolume() {} position() { return this.audio.currentTime } element() { return this.audio }
+  load() {} play() { return Promise.resolve() } pause() {} unload() {} seek() {} setVolume() {} position() { return this.audio.currentTime } element() { return this.audio }
 } }))
 
 const renderApp = () => {

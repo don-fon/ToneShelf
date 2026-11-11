@@ -34,7 +34,7 @@ func TestDuplicateUploadDecisionAndRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { s.Close() }()
-			api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 			source := filepath.Join(root, "different-filename.flac")
 			if out, err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=0.2", "-metadata", "title=Same Song", source).CombinedOutput(); err != nil {
 				t.Fatalf("generate %s %v", out, err)

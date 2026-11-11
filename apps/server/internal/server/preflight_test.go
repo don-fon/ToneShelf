@@ -34,7 +34,7 @@ func TestUploadPreflightBeforeVisibleTasks(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { s.Close() }()
-			api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 			source := filepath.Join(root, "source.flac")
 			args := []string{"-v", "error", "-f", "lavfi", "-i", "sine=duration=0.2"}
 			if mode != "filename" {
@@ -222,7 +222,7 @@ func TestPreflightRejectsMissingPlaylistBeforeReceiving(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	api := &API{Store: s}
+	api := &API{ResolveUser: testUserResolver, Store: s}
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/uploads/check?playlistId=missing", strings.NewReader("")))
 	if response.Code != http.StatusNotFound {

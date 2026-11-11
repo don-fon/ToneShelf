@@ -26,7 +26,29 @@ Linux / NAS：
 
 脚本会检查 Go、Node.js/npm 和 FFmpeg/ffprobe，随后自动安装前端依赖、构建网页并启动服务。如果 PowerShell 的脚本执行策略阻止运行，可以使用 `powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1`。
 
-随后访问 <http://127.0.0.1:8080>。开发启动脚本默认继续使用仓库根目录的 `.data`；提供 `--config`、`--data-dir`、`MUSIC_CONFIG` 或 `MUSIC_DATA_DIR` 时使用指定配置。服务端启动日志打印实际配置文件、数据目录、数据库和监听地址。部署到其他设备访问时，应显式设置监听地址，并在可信网络或反向代理后运行；身份验证尚未实现。
+首次运行或升级后，先为原音乐库设置账号（在仓库目录执行）：
+
+```sh
+go run ./apps/server/cmd/music-player account add --data-dir ./.data --id default-user
+```
+
+命令输出随机生成的登录账号，只显示一次。随后启动服务并访问 <http://127.0.0.1:8080>，输入该账号登录。账号本身承担密码作用，登录框为普通文本输入；客户端不能注册。升级不会删除原歌曲和设置，也不会自动启用匿名登录。
+
+开发启动脚本默认继续使用仓库根目录的 `.data`；提供 `--config`、`--data-dir`、`MUSIC_CONFIG` 或 `MUSIC_DATA_DIR` 时使用指定配置。服务端启动日志打印实际配置文件、数据目录、数据库和监听地址。部署到其他设备访问时，应显式设置监听地址；账号校验支持 HTTP，但传输加密仍需 HTTPS。
+
+## 服务器账号管理
+
+部署后直接使用服务程序，不需要 Go 开发环境。各命令均需指定与服务相同的 `--config` 或 `--data-dir`：
+
+```sh
+./music-player account add --data-dir /var/lib/music-player --id default-user
+./music-player account add --data-dir /var/lib/music-player --id phone-user --name 手机用户
+./music-player account list --data-dir /var/lib/music-player
+./music-player account reset --data-dir /var/lib/music-player --id default-user
+./music-player account disable --data-dir /var/lib/music-player --id phone-user
+```
+
+`add` 为尚未配置凭据的用户添加账号，新用户自动创建空默认歌单；`reset` 生成新账号并撤销全部旧会话，也可重新启用已停用用户。`disable` 撤销该用户凭据与会话，保留音乐库。账号不可从列表找回，遗失时使用 `reset`。添加 `--account-stdin` 可通过标准输入提供自己的账号，命令不回显该值；不要将账号写到命令行参数、脚本或版本库中。会话默认有效 30 天，退出登录会立即撤销当前会话。账号凭据、会话、稳定用户 ID 分开存储，后续可加入独立密码。
 
 ## 配置与数据目录
 
@@ -88,7 +110,7 @@ npm run verify
 - 回收站查看与恢复；歌曲满 72 小时后由启动、定时和请求触发的清理器永久移除，失败会保留状态并重试。
 - 在保留歌曲 ID、歌词、播放设置和歌单关系的前提下替换音频；切换成功后立即清理旧文件，失败则持久化等待重试。
 
-正式账号认证、手动重试转码和完整部署方案仍待实现。
+独立密码、手动重试转码和完整部署方案仍待实现。
 
 ## 文档
 
@@ -98,7 +120,7 @@ npm run verify
 ## 初版范围摘要
 
 - 网页客户端同时面向手机和电脑浏览器，访问同一个服务器音乐库。
-- 默认单账号，但数据和服务边界为未来多账号预留。
+- 账号由服务器管理员创建，网页登录后访问各自音乐库，不提供客户端注册。
 - 上传音乐后自动加入默认歌单。
 - 默认空间配额为 10 GiB，客户端显示已用容量。
 - 用户可以创建和编辑歌单。

@@ -38,7 +38,7 @@ func coverUploadFixture(t *testing.T) (*API, store.Track, string, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root)}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root)}
 	t.Cleanup(func() { api.Store.Close() })
 	original := filepath.Join(root, "media", "originals", "song.mp3")
 	if err = os.WriteFile(original, []byte("original"), 0600); err != nil {
@@ -221,7 +221,7 @@ func TestCoverUploadOwnerChecksAndRetiredOnlineRoutes(t *testing.T) {
 	api, _, _, picture := coverUploadFixture(t)
 	api.ResolveUser = func(*http.Request) (string, error) { return "other", nil }
 	postCover(t, api, picture, 404)
-	api.ResolveUser = nil
+	api.ResolveUser = testUserResolver
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, httptest.NewRequest("POST", "/api/tracks/song/cover/search", strings.NewReader(`{}`)))
 	if response.Code != 404 {

@@ -41,7 +41,7 @@ func TestLyricsSearchEndpointReturnsCandidatesWithoutSaving(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root), Lyrics: lyrics.New(provider.URL), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Lyrics: lyrics.New(provider.URL), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/tracks/track-1/lyrics/search", nil))
 	if response.Code != http.StatusOK {
@@ -106,7 +106,7 @@ func testUploadFlow(t *testing.T, filename string, encodeArgs []string, wantTran
 		t.Fatal(err)
 	}
 	defer s.Close()
-	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	handler := api.Handler()
 
 	var body bytes.Buffer
@@ -286,7 +286,7 @@ func TestPlaylistTrashAndRestoreEndpoints(t *testing.T) {
 	if _, err = s.InsertTrack(ctx, store.NewTrack{ID: "track-1", Title: "test", OriginalPath: path, PlayablePath: path, ContentType: "audio/mpeg", SizeBytes: 5, DurationSeconds: 10}); err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	handler := api.Handler()
 
 	conflict := httptest.NewRecorder()
@@ -336,7 +336,7 @@ func TestMaintenanceRetainsFailedPurgeAndRetries(t *testing.T) {
 	if err = s.SoftDeleteTrack(ctx, "track-1", time.Now().Add(-73*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	api.Maintain(ctx)
 	trash, err := s.Trash(ctx)
 	if err != nil || len(trash) != 1 || trash[0].PurgeError == "" {
@@ -359,7 +359,7 @@ func TestPlaylistsEndpointUsesEmptyArrays(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	res := httptest.NewRecorder()
 	api.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/playlists", nil))
 	if res.Code != http.StatusOK {
@@ -391,7 +391,7 @@ func TestAudioEndpointSupportsRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	req := httptest.NewRequest(http.MethodGet, "/api/tracks/track-1/audio", nil)
 	req.Header.Set("Range", "bytes=2-5")
 	res := httptest.NewRecorder()
@@ -418,7 +418,7 @@ func TestTrackUpdateRejectsInvalidRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	req := httptest.NewRequest(http.MethodPatch, "/api/tracks/track-1", strings.NewReader(`{"baseRandomWeight":1,"playbackStartSeconds":4,"playbackEndSeconds":3,"volumeRatio":0.8,"lyrics":""}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
@@ -460,7 +460,7 @@ func TestWebClientAndSPAFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), WebDir: web}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), WebDir: web}
 	for _, path := range []string{"/", "/playlist/example"} {
 		res := httptest.NewRecorder()
 		api.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))

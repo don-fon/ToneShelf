@@ -9,6 +9,8 @@ import (
 	"music-player/server/internal/store"
 )
 
+func testUserResolver(*http.Request) (string, error) { return store.DefaultUserID, nil }
+
 func TestCurrentUserForPlaybackSessionUsesTrustedIdentity(t *testing.T) {
 	for _, id := range []string{store.DefaultUserID, "other-user"} {
 		api := &API{ResolveUser: func(*http.Request) (string, error) { return id, nil }}

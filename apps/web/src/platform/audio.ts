@@ -6,6 +6,7 @@ export interface AudioEngine {
   load(url: string, original?: OriginalAudioSource): void
   play(): Promise<void>
   pause(): void
+  unload(): void
   seek(seconds: number): void
   setVolume(value: number): void
   position(): number
@@ -54,6 +55,7 @@ export class WebAudioEngine implements AudioEngine {
     }
   }
   pause() { this.wantsPlaying = false; this.audio.pause() }
+  unload() { this.pause(); this.sourceKey = ''; this.fallbackURL = null; this.pendingPosition = null; this.lastPosition = 0; this.audio.removeAttribute('src'); this.audio.load() }
   seek(seconds: number) {
     this.lastPosition = seconds
     if (this.audio.readyState >= 1) {

@@ -25,7 +25,7 @@ const trackSubtitle = (track: Track) => {
   return (track.artist || '未知艺术家') + (album && normalized(album) !== normalized(track.title) ? ' · ' + album : '')
 }
 
-export function App() {
+export function App({ onLogout, logoutBusy = false }: { onLogout?: () => void; logoutBusy?: boolean } = {}) {
   const query = useQueryClient()
   const { data: playlists = [], isLoading, error, dataUpdatedAt } = useQuery({ queryKey: ['playlists'], queryFn: api.playlists })
   const { data: quota } = useQuery({ queryKey: ['quota'], queryFn: api.quota })
@@ -34,6 +34,7 @@ export function App() {
   const active = playlists.find((playlist) => playlist.id === player.playlistID) ?? playlists[0]
   const current = active?.tracks.find((track) => track.id === player.trackID) ?? null
   const [engine] = useState(() => new WebAudioEngine())
+  useEffect(() => () => engine.unload(), [engine])
   const audioReplacementInput = useRef<HTMLInputElement>(null)
   const [editing, setEditing] = useState<Track | null>(null)
   const settings = useSongSettingsSave(() => setEditing(null))
@@ -184,7 +185,7 @@ export function App() {
       setPosition(engine.position()); player.setPosition(engine.position())
     }
     const onEnded = () => player.mode === 'repeat-one' && current ? (audio.currentTime = current.playbackStartSeconds, void audio.play()) : next()
-    const onError = () => { if (audio.error) player.setPlaying(false) }
+    const onError = () => { if (audio.error) { player.setPlaying(false); void api.currentUser().catch(() => {}) } }
     audio.addEventListener('timeupdate', onTime); audio.addEventListener('ended', onEnded)
     audio.addEventListener('error', onError)
     return () => { audio.removeEventListener('timeupdate', onTime); audio.removeEventListener('ended', onEnded); audio.removeEventListener('error', onError) }
@@ -218,8 +219,9 @@ export function App() {
       <nav>{playlists.map((playlist) => <button className={!showTrash && playlist.id === active?.id ? 'active' : ''} key={playlist.id} onClick={() => { setShowTrash(false); setMobileView('songs'); if (playlist.id !== player.playlistID) player.selectPlaylist(playlist.id) }}><span>{playlist.isDefault ? '♥' : '≡'}</span>{playlist.name}<em>{playlist.tracks.length}</em></button>)}</nav>
       <form className="new-list" onSubmit={(event) => { event.preventDefault(); if (playlistName.trim()) { create.mutate(playlistName.trim()); setPlaylistName('') } }}><input value={playlistName} onChange={(event) => setPlaylistName(event.target.value)} placeholder="新建歌单"/><button>＋</button></form>
       <div className="sidebar-tools" role="group" aria-label="音乐库工具">
-      <button className="shortcuts-toggle" type="button" aria-label="快捷键" title="快捷键（?）" onClick={() => setShowShortcuts(true)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 15h10"/></svg><span>快捷键</span></button>
-      <button className={`trash-toggle ${showTrash ? 'active' : ''}`} type="button" aria-label="回收站" aria-pressed={showTrash} title="回收站" onClick={() => { setShowTrash(true); setShowQuota(false); }}><svg className="trash-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg><span className="trash-label">回收站</span>{trash.length > 0 && <span className="trash-count">{trash.length}</span>}</button>
+        {onLogout && <button className="sidebar-tool-button logout-button" type="button" title="退出登录" aria-label="退出登录" disabled={logoutBusy} onClick={onLogout}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10 4H5v16h5m4-12 4 4-4 4m-5-4h10"/></svg><span className="logout-label">退出登录</span></button>}
+      <button className="sidebar-tool-button shortcuts-toggle" type="button" aria-label="快捷键" title="快捷键（?）" onClick={() => setShowShortcuts(true)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 15h10"/></svg><span>快捷键</span></button>
+      <button className={`sidebar-tool-button trash-toggle ${showTrash ? 'active' : ''}`} type="button" aria-label="回收站" aria-pressed={showTrash} title="回收站" onClick={() => { setShowTrash(true); setShowQuota(false); }}><svg className="trash-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg><span className="trash-label">回收站</span>{trash.length > 0 && <span className="trash-count">{trash.length}</span>}</button>
       <div className="quota-disclosure" ref={quotaRef} data-open={showQuota} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowQuota(false) }} onKeyDown={(event) => { if (event.key === 'Escape') { setShowQuota(false); quotaRef.current?.querySelector('button')?.focus() } }}>
         <button className="quota-toggle" type="button" aria-label="存储空间" title="存储空间" aria-expanded={showQuota} aria-controls="storage-quota" onClick={() => { setShowQuota(!showQuota); }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 14h18M16 17h2"/></svg></button>
         <div id="storage-quota" className="quota" title={quota?.reservedBytes ? `含处理中预留 ${bytes(quota.reservedBytes)}` : undefined}><b>已用 {bytes((quota?.usedBytes ?? 0) + (quota?.reservedBytes ?? 0))} / {bytes(quota?.limitBytes)}</b><i><u style={{ width: `${Math.min(100, (((quota?.usedBytes ?? 0) + (quota?.reservedBytes ?? 0)) / (quota?.limitBytes || 1)) * 100)}%` }}/></i></div>

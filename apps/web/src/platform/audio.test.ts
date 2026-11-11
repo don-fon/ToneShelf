@@ -18,6 +18,21 @@ function setup(supported = true) {
 }
 
 describe('original audio with fallback', () => {
+  it('unloads on logout and can reload the same source on a subsequent mount', async () => {
+    const { engine, audio, pause, play } = setup()
+    const load = vi.spyOn(audio, 'load').mockImplementation(() => {})
+    engine.load('/private.mp3'); await engine.play()
+    engine.seek(40)
+    engine.unload()
+    expect(pause).toHaveBeenCalledOnce()
+    expect(load).toHaveBeenCalledOnce()
+    expect(audio.getAttribute('src')).toBeNull()
+    expect(engine.position()).toBe(0)
+    audio.dispatchEvent(new Event('error'))
+    expect(play).toHaveBeenCalledOnce()
+    engine.load('/private.mp3')
+    expect(audio.src).toMatch(/private\.mp3$/)
+  })
   it('prefers a supported original and applies restored progress after metadata', () => {
     const { engine, audio, metadata } = setup()
     engine.load('/fallback.mp3', { url: '/original.flac', contentType: 'audio/flac' })

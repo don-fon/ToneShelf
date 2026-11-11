@@ -75,7 +75,7 @@ func TestRequestCurrentUserIsolationAndSpoofing(t *testing.T) {
 	}
 	api.ResolveUser = nil
 	out = request(http.MethodGet, "/api/playlists?userId=user-b", "")
-	if out.Code != http.StatusOK || strings.Contains(out.Body.String(), "secret-user-b") || !strings.Contains(out.Body.String(), "secret-"+store.DefaultUserID) {
+	if out.Code != http.StatusUnauthorized {
 		t.Fatalf("default resolver %s", out.Body.String())
 	}
 	for _, resolver := range []UserResolver{func(*http.Request) (string, error) { return "", nil }, func(*http.Request) (string, error) { return "", errors.New("no session") }} {
@@ -142,7 +142,7 @@ func TestBackgroundRecoveryAndPlaybackFilesUsePersistedOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if err = api.RecoverJobs(ctx); err != nil {
 		t.Fatal(err)
 	}

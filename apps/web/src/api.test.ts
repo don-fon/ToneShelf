@@ -2,10 +2,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
 import { uploadSession } from './platform/upload-session'
 import { uploadFile } from './platform/upload'
+import { advanceAuthGeneration, watchAuthExpired } from './platform/auth-events'
 
 vi.mock('./platform/upload', () => ({ uploadFile: vi.fn() }))
 
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear() })
+
+it('does not let a delayed unauthorized response clear a newer login session', async () => {
+  let finish!: (value: unknown) => void
+  vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { finish = resolve })))
+  const expired = vi.fn(); const stop = watchAuthExpired(expired)
+  const pending = api.playlists()
+  advanceAuthGeneration()
+  finish({ ok: false, status: 401, json: async () => ({ error: '请先登录' }) })
+  await expect(pending).rejects.toMatchObject({ status: 401 })
+  expect(expired).not.toHaveBeenCalled()
+  stop()
+})
 
 describe('playlist API normalization', () => {
   it('moves a song through one request containing the destination playlist', async () => {

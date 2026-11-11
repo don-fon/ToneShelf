@@ -25,7 +25,7 @@ func TestCoverUploadAndReplacementFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	api := &API{Store: s, Media: media.New(root)}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root)}
 	art := filepath.Join(root, "embedded.jpg")
 	f, err := os.Create(art)
 	if err != nil {

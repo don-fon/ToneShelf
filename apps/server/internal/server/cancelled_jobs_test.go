@@ -47,7 +47,7 @@ func TestMaintenancePrunesLegacyCancelledJobsAndPreservesFailures(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/jobs", nil))
 	if strings.Contains(response.Body.String(), "已取消") || !strings.Contains(response.Body.String(), "转码失败") {

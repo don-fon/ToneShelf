@@ -1,7 +1,9 @@
 import type { UploadJob } from '@music/domain'
+import { authGeneration, notifyAuthExpired } from './auth-events'
 
 export function uploadFile(url: string, file: File, onProgress?: (percent: number) => void, requestKey?: string): Promise<UploadJob> {
   return new Promise((resolve, reject) => {
+    const generation = authGeneration()
     const xhr = new XMLHttpRequest()
     xhr.open('POST', url)
     if (requestKey) xhr.setRequestHeader('X-Upload-Key', requestKey)
@@ -11,6 +13,7 @@ export function uploadFile(url: string, file: File, onProgress?: (percent: numbe
     xhr.onerror = () => reject(new Error('上传连接中断，请检查任务列表后重新上传'))
     xhr.onabort = () => reject(new Error('上传已中断'))
     xhr.onload = () => {
+      if (xhr.status === 401) notifyAuthExpired(generation)
       try {
         const body = JSON.parse(xhr.responseText)
         if (xhr.status >= 200 && xhr.status < 300) resolve(body as UploadJob)

@@ -31,7 +31,7 @@ func TestRecoveryRequeuesFullFileAndCleansInterruptedUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	source := filepath.Join(root, "source.wav")
 	if output, err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=0.2", source).CombinedOutput(); err != nil {
 		t.Fatalf("generate: %v %s", err, output)
@@ -134,7 +134,7 @@ func TestUploadQuotaRejectsBeforeWritingAndReleasesReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	api := &API{Store: s, Media: media.New(root), QuotaLimit: 10}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), QuotaLimit: 10}
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
 	part, _ := form.CreateFormFile("file", "too-large.aac")
@@ -173,7 +173,7 @@ func TestSmallUploadFitsNearQuotaAndReleasesUnusedBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	api := &API{Store: s, Media: media.New(root), QuotaLimit: 10}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), QuotaLimit: 10}
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
 	part, _ := form.CreateFormFile("file", "small.mp3")
@@ -229,7 +229,7 @@ func TestTranscodeQuotaFailurePreservesOldAudioAndCleansCandidates(t *testing.T)
 	if err = s.SetJobState(ctx, job.ID, "receiving", "queued", ""); err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root), QuotaLimit: info.Size() + 3 + 100}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root), QuotaLimit: info.Size() + 3 + 100}
 	failed := finishTestJob(t, api, job.ID, "failed")
 	if !strings.Contains(failed.Error, "空间不足") || failed.ReservedBytes != 0 {
 		t.Fatalf("quota failure=%#v", failed)
@@ -272,7 +272,7 @@ func TestStartupCleansOrphansAndProtectsReferencedMedia(t *testing.T) {
 	if _, err = s.InsertTrack(ctx, store.NewTrack{ID: "active", Title: "active", OriginalPath: withDot, PlayablePath: withDot, SizeBytes: 5, DurationSeconds: 10}); err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s, Media: media.New(root)}
+	api := &API{ResolveUser: testUserResolver, Store: s, Media: media.New(root)}
 	if err = api.RecoverJobs(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestFailedJobCleanupRetriesWithoutReleasingQuotaEarly(t *testing.T) {
 	if err = s.SetJobState(ctx, job.ID, "receiving", "failed", "disk error"); err != nil {
 		t.Fatal(err)
 	}
-	api := &API{Store: s}
+	api := &API{ResolveUser: testUserResolver, Store: s}
 	api.Maintain(ctx)
 	reserved, _ := s.ReservedBytes(ctx)
 	if reserved != 1 {
