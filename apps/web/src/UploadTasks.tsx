@@ -51,6 +51,7 @@ export function UploadTasks({ playlistID, anchor, lyricsView = false }: { playli
     previousSnapshot.current = snapshot
     if (previous === undefined) return
     void query.invalidateQueries({ queryKey: ['playlists'] })
+    void query.invalidateQueries({ queryKey: ['library'] })
     void query.invalidateQueries({ queryKey: ['quota'] })
   }, [snapshot, query])
   useEffect(() => { void query.invalidateQueries({ queryKey: ['quota'] }) }, [reservations, query])
@@ -110,7 +111,7 @@ export function UploadTasks({ playlistID, anchor, lyricsView = false }: { playli
     try {
       await api.resolveUpload(id, overwrite)
       if (!overwrite) setLocal((items) => items.filter((item) => item.jobID !== id))
-      await Promise.all(['jobs', 'playlists', 'quota'].map((key) => query.invalidateQueries({ queryKey: [key] })))
+      await Promise.all(['jobs', 'playlists', 'library', 'quota'].map((key) => query.invalidateQueries({ queryKey: [key] })))
     } catch (reason) {
       setDecisionError(reason instanceof Error ? reason.message : '操作失败，请重试')
     } finally {

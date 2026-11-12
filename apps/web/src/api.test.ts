@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
+import type { Track } from '@music/domain'
 import { uploadSession } from './platform/upload-session'
 import { uploadFile } from './platform/upload'
 import { advanceAuthGeneration, watchAuthExpired } from './platform/auth-events'
@@ -7,6 +8,13 @@ import { advanceAuthGeneration, watchAuthExpired } from './platform/auth-events'
 vi.mock('./platform/upload', () => ({ uploadFile: vi.fn() }))
 
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear() })
+
+it('does not send tag associations when saving song playback and lyrics settings', async () => {
+  const fetch=vi.fn().mockResolvedValue({ok:true,status:200,json:async()=>({})})
+  vi.stubGlobal('fetch',fetch)
+  await api.updateTrack({id:'song',title:'Song',artist:'',tagIds:['old-tag']} as Track)
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).not.toHaveProperty('tagIds')
+})
 
 it('does not let a delayed unauthorized response clear a newer login session', async () => {
   let finish!: (value: unknown) => void

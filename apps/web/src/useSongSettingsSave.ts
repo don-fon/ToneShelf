@@ -14,7 +14,7 @@ export function useSongSettingsSave(onSaved: () => void) {
   const pending = useRef<{ audio?: PendingFile; cover?: PendingFile }>({})
   const savedSettings = useRef<Track | null>(null)
 
-  const refresh = () => Promise.all(['playlists', 'quota', 'jobs'].map((key) => query.invalidateQueries({ queryKey: [key] })))
+  const refresh = () => Promise.all(['library', 'playlists', 'quota', 'jobs'].map((key) => query.invalidateQueries({ queryKey: [key] })))
   const applyFile = async (kind: 'audio' | 'cover', trackID: string, file: File) => {
     const label = kind === 'audio' ? '音频' : '封面'
     setStatus(`正在保存${label}…`)

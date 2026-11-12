@@ -10,6 +10,7 @@ export function readPlayback(value: unknown): PlaybackState {
   for (const key of ['playlistID', 'trackID'] as const) if (typeof value[key] === 'string' && value[key]) state[key] = value[key]
   if (Number.isSafeInteger(value.audioVersion) && (value.audioVersion as number) > 0) state.audioVersion = value.audioVersion as number
   if (value.mode === 'repeat-one') state.mode = value.mode
+  if (Array.isArray(value.tagSelection)) state.tagSelection = [...new Set(value.tagSelection.filter((id): id is string => typeof id === 'string' && !!id))]
   state.playing = value.playing === true
   if (finite(value.position)) state.position = Math.max(0, value.position)
   if (finite(value.masterVolume)) state.masterVolume = Math.max(0, Math.min(1, value.masterVolume))

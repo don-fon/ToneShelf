@@ -1,4 +1,4 @@
-import type { CurrentUser, LyricsSearchResult, Playlist, Quota, Track, UploadJob } from '@music/domain'
+import type { CurrentUser, Library, LyricsSearchResult, Playlist, Quota, Track, UploadJob } from '@music/domain'
 
 import { uploadFile } from './platform/upload'
 import { createUploadKey } from './platform/upload-session'
@@ -25,6 +25,12 @@ export const api = {
   login: (account: string) => request<CurrentUser>('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account }) }),
   logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
   currentUser: () => request<CurrentUser>('/api/current-user'),
+  library: () => request<Library>('/api/library'),
+  saveTag: (name: string, id?: string) => request<void>(id ? `/api/tags/${id}` : '/api/tags', { method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  deleteTag: (id: string) => request<void>(`/api/tags/${id}`, { method: 'DELETE' }),
+  saveTagGroup: (name: string, tagIds: string[], id?: string) => request<void>(id ? `/api/tag-groups/${id}` : '/api/tag-groups', { method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, tagIds }) }),
+  deleteTagGroup: (id: string) => request<void>(`/api/tag-groups/${id}`, { method: 'DELETE' }),
+  setTrackTags: (trackIds: string[], tagIds: string[], mode: 'add' | 'remove') => request<void>('/api/track-tags', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackIds, tagIds, mode }) }),
   playlists: async () => {
     const playlists = await request<PlaylistPayload[] | null>('/api/playlists')
     return (playlists ?? []).map((playlist) => ({ ...playlist, tracks: playlist.tracks ?? [] }))

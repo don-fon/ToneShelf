@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -27,6 +28,7 @@ type Store struct {
 }
 
 type Track struct {
+	TagIDs               []string `json:"tagIds"`
 	CoverVersion         int64    `json:"-"`
 	CoverURL             string   `json:"coverUrl,omitempty"`
 	CoverPath            string   `json:"-"`
@@ -179,9 +181,21 @@ func (s *Store) tracksForPlaylist(ctx context.Context, playlistID string) ([]Tra
 	if err := currentuser.Require(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT t.id,t.title,t.artist,t.album,t.content_type,t.size_bytes,t.duration_seconds,t.base_random_weight,t.playback_start_seconds,t.playback_end_seconds,t.volume_ratio,t.lyrics,t.lyrics_layout,t.lyrics_primary_line,t.original_path,t.playable_path,t.audio_version,t.original_content_type,t.playback_index_version,t.duration_probe_version,t.file_name,t.created_at,t.cover_path,t.cover_version
+	return s.queryTracks(ctx, `SELECT t.id,t.title,t.artist,t.album,t.content_type,t.size_bytes,t.duration_seconds,t.base_random_weight,t.playback_start_seconds,t.playback_end_seconds,t.volume_ratio,t.lyrics,t.lyrics_layout,t.lyrics_primary_line,t.original_path,t.playable_path,t.audio_version,t.original_content_type,t.playback_index_version,t.duration_probe_version,t.file_name,t.created_at,t.cover_path,t.cover_version
 		FROM playlist_items pi JOIN tracks t ON t.id=pi.track_id JOIN playlists p ON p.id=pi.playlist_id
 		WHERE pi.playlist_id=? AND t.deleted_at IS NULL AND t.owner_user_id=? AND p.owner_user_id=? ORDER BY pi.position`, playlistID, currentuser.ID(ctx), currentuser.ID(ctx))
+}
+
+func (s *Store) queryTracks(ctx context.Context, query string, args ...any) ([]Track, error) {
+	return s.queryTracksWith(ctx, s.db, query, args...)
+}
+
+type trackQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func (s *Store) queryTracksWith(ctx context.Context, source trackQueryer, query string, args ...any) ([]Track, error) {
+	rows, err := source.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +245,24 @@ func (s *Store) Track(ctx context.Context, id string) (Track, error) {
 	}
 	if err != nil {
 		return t, err
+	}
+	rows, tagErr := s.db.QueryContext(ctx, `SELECT tag_id FROM track_tags tt JOIN tags tag ON tag.id=tt.tag_id WHERE tt.track_id=? AND tag.owner_user_id=? ORDER BY tag_id`, id, currentuser.ID(ctx))
+	if tagErr != nil {
+		return t, tagErr
+	}
+	t.TagIDs = []string{}
+	for rows.Next() {
+		var tag string
+		if tagErr = rows.Scan(&tag); tagErr != nil {
+			rows.Close()
+			return t, tagErr
+		}
+		t.TagIDs = append(t.TagIDs, tag)
+	}
+	tagErr = rows.Err()
+	rows.Close()
+	if tagErr != nil {
+		return t, tagErr
 	}
 	return s.resolveTrack(t)
 }
@@ -338,8 +370,28 @@ func (s *Store) UpdateTrack(ctx context.Context, id string, weight, start float6
 	} else if start >= t.DurationSeconds {
 		return Track{}, errors.New("invalid playback range")
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE tracks SET title=COALESCE(?,title),artist=COALESCE(?,artist),custom_title=CASE WHEN ? IS NULL THEN custom_title ELSE 1 END,custom_artist=CASE WHEN ? IS NULL THEN custom_artist ELSE 1 END,base_random_weight=?,playback_start_seconds=?,playback_end_seconds=?,volume_ratio=?,lyrics=?,lyrics_layout=COALESCE(?,lyrics_layout),lyrics_primary_line=COALESCE(?,lyrics_primary_line),updated_at=? WHERE id=? AND owner_user_id=?`, title, artist, title, artist, weight, start, endValue, volume, ensureLyricsOffset(lyrics), layout, primary, time.Now().UTC().Format(time.RFC3339Nano), id, currentuser.ID(ctx))
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return Track{}, err
+	}
+	defer tx.Rollback()
+	if len(optional) > 4 && optional[4] != nil {
+		var tags []string
+		if err = json.Unmarshal([]byte(*optional[4]), &tags); err != nil {
+			return Track{}, err
+		}
+		if err = validateTagsTx(ctx, tx, tags, false); err != nil {
+			return Track{}, err
+		}
+		if err = replaceTrackTagsTx(ctx, tx, id, tags); err != nil {
+			return Track{}, err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE tracks SET title=COALESCE(?,title),artist=COALESCE(?,artist),custom_title=CASE WHEN ? IS NULL THEN custom_title ELSE 1 END,custom_artist=CASE WHEN ? IS NULL THEN custom_artist ELSE 1 END,base_random_weight=?,playback_start_seconds=?,playback_end_seconds=?,volume_ratio=?,lyrics=?,lyrics_layout=COALESCE(?,lyrics_layout),lyrics_primary_line=COALESCE(?,lyrics_primary_line),updated_at=? WHERE id=? AND owner_user_id=?`, title, artist, title, artist, weight, start, endValue, volume, ensureLyricsOffset(lyrics), layout, primary, time.Now().UTC().Format(time.RFC3339Nano), id, currentuser.ID(ctx))
+	if err != nil {
+		return Track{}, err
+	}
+	if err = tx.Commit(); err != nil {
 		return Track{}, err
 	}
 	return s.Track(ctx, id)

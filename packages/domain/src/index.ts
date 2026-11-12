@@ -2,6 +2,7 @@ export type LyricsLayout = 'timestamp' | 'separate'
 export type LyricsPrimaryLine = 'first' | 'last'
 
 export interface Track {
+  tagIds?: string[]
   id: string
   title: string
   artist: string
@@ -34,6 +35,10 @@ export interface Playlist {
   isDefault: boolean
   tracks: Track[]
 }
+
+export interface Tag { id: string; name: string }
+export interface TagGroup { id: string; name: string; isDefault: boolean; tagIds: string[] }
+export interface Library { tracks: Track[]; tags: Tag[]; groups: TagGroup[] }
 
 export interface UploadJob {
   playlistId?: string
@@ -81,6 +86,7 @@ export type PlaybackMode = 'random' | 'repeat-one'
 export interface CurrentUser { id: string; isDefault: boolean }
 
 export interface PlaybackState {
+  tagSelection?: string[]
   playlistID: string | null
   trackID: string | null
   audioVersion: number | null

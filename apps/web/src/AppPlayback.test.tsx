@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Track } from '@music/domain'
+import type { Track, Playlist, Library } from '@music/domain'
 import { App } from './App'
 import { initializePlayerSession, usePlayer } from './player-store'
 import { api } from './api'
@@ -34,7 +34,7 @@ const track: Track = {
   fileName: 'song.mp3', uploadedAt: '2026-11-08T00:00:00Z',
 }
 vi.mock('./api', () => ({ api: {
-  playlists: vi.fn(async () => [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track] }]),
+  library: vi.fn(async () => ({ tracks: [track], tags: [], groups: [{ id: 'default', name: '默认标签组', isDefault: true, tagIds: ['_untagged'] }] })),
   quota: vi.fn(async () => ({ usedBytes: 1, reservedBytes: 0, limitBytes: 1024, remainingBytes: 1023 })),
   trash: vi.fn(async () => []),
   jobs: vi.fn(async () => []),
@@ -49,6 +49,13 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+
+function asLibrary(playlists: Playlist[]): Library {
+  const tracks = [...new Map(playlists.flatMap((p) => p.tracks).map((track) => [track.id, track])).values()]
+  return { tracks, tags: [], groups: [{ id: 'default', name: '默认标签组', isDefault: true, tagIds: ['_untagged'] }] }
+}
+const setLibrary = (query: QueryClient, playlists: Playlist[]) => query.setQueryData<Library>(['library'], asLibrary(playlists))
+
 async function setup(playing = true) {
   usePlayer.setState({ playlistID: 'list', trackID: track.id, audioVersion: 1, position: 48, playing, masterVolume: 1 })
   const query = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -62,6 +69,32 @@ async function setup(playing = true) {
 }
 
 describe('independent playback controls', () => {
+  it.each(['random', 'repeat-one'] as const)('changes tag switches without stopping the current song and stops at its end if no candidates remain (%s)', async (mode) => {
+    const query = await setup()
+    act(() => { usePlayer.getState().setMode(mode) })
+    const recovery = usePlayer.getState().recovery
+    fireEvent.click(screen.getByRole('button', { name: '标签 无' }))
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(usePlayer.getState().trackID).toBe(track.id)
+    expect(usePlayer.getState().recovery).toEqual(recovery)
+    expect(screen.queryByRole('group', { name: '歌曲 Playback test' })).toBeNull()
+    expect(audio.pause).not.toHaveBeenCalled()
+    act(() => { audio.element!.dispatchEvent(new Event('ended')) })
+    expect(usePlayer.getState().playing).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '应用标签组 默认标签组' }))
+    expect(await screen.findByRole('group', { name: '歌曲 Playback test' })).toBeTruthy()
+    expect(query.getQueryData(['library'])).toBeTruthy()
+  })
+  it('restarts the playback interval when the filtered random pool contains only the current song', async () => {
+    await setup()
+    audio.element!.currentTime = 120
+    act(() => { audio.element!.dispatchEvent(new Event('ended')) })
+    expect(usePlayer.getState().trackID).toBe(track.id)
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(usePlayer.getState().position).toBe(5)
+    expect(audio.seek).toHaveBeenLastCalledWith(5)
+    expect(audio.play).toHaveBeenCalledOnce()
+  })
   it('connects system media controls to playback, interval seeking and weighted next-track selection', async () => {
     const handlers = new Map<MediaSessionAction, MediaSessionActionHandler | null>()
     const session = { metadata: null as MediaMetadata | null, playbackState: 'none', setPositionState: vi.fn(), setActionHandler: (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => handlers.set(action, handler) }
@@ -81,7 +114,7 @@ describe('independent playback controls', () => {
     expect(audio.seek).toHaveBeenLastCalledWith(5)
     expect(usePlayer.getState().position).toBe(5)
     act(() => {
-      query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'second', title: 'Second', audioUrl: '/second', playbackStartSeconds: 7 }] }])
+      setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'second', title: 'Second', audioUrl: '/second', playbackStartSeconds: 7 }] }])
     })
     await screen.findByRole('button', { name: '设置 Second' })
     act(() => { handlers.get('nexttrack')!({ action: 'nexttrack' }) })
@@ -117,7 +150,7 @@ describe('independent playback controls', () => {
 
   it('uses Space to pause the current song even when another song row has focus', async () => {
     const query = await setup()
-    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'second', title: 'Second', audioUrl: '/second' }] }]) })
+    act(() => { setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'second', title: 'Second', audioUrl: '/second' }] }]) })
     const row = await screen.findByRole('group', { name: '歌曲 Second' })
     row.focus()
     fireEvent.keyDown(row, { key: ' ' })
@@ -140,7 +173,7 @@ describe('independent playback controls', () => {
 
   it('seeks from the live audio position and clamps shortcuts to the song playback interval', async () => {
     const query = await setup(false)
-    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, playbackEndSeconds: 52 }] }]) })
+    act(() => { setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, playbackEndSeconds: 52 }] }]) })
     await waitFor(() => expect(document.querySelector('.controls input')?.getAttribute('max')).toBe('52'))
     audio.element!.currentTime = 48.8
     fireEvent.keyDown(document.body, { key: 'ArrowRight' })
@@ -172,7 +205,7 @@ describe('independent playback controls', () => {
 
   it('uses N for the existing next-song policy and ignores keys while help is open', async () => {
     const query = await setup(false)
-    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'second', title: 'Second', audioUrl: '/second', playbackStartSeconds: 7 }] }]) })
+    act(() => { setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'second', title: 'Second', audioUrl: '/second', playbackStartSeconds: 7 }] }]) })
     await screen.findByRole('button', { name: '设置 Second' })
     fireEvent.keyDown(document.body, { key: 'n' })
     expect(usePlayer.getState().trackID).toBe('second')
@@ -186,7 +219,7 @@ describe('independent playback controls', () => {
   })
   it('updates artwork without seeking, pausing or reloading audio', async () => {
     const query = await setup()
-    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, coverUrl: '/api/tracks/song/cover?v=1&c=2' }] }]) })
+    act(() => { setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, coverUrl: '/api/tracks/song/cover?v=1&c=2' }] }]) })
     await waitFor(() => expect(document.querySelector('.now img')?.getAttribute('src')).toBe('/api/tracks/song/cover?v=1&c=2'))
     expect(audio.seek).not.toHaveBeenCalled()
     expect(audio.load).not.toHaveBeenCalled()
@@ -196,8 +229,8 @@ describe('independent playback controls', () => {
   })
 
   it('waits for the library before validating restored playback and pauses if autoplay is blocked', async () => {
-    let resolve!: (value: Awaited<ReturnType<typeof api.playlists>>) => void
-    vi.mocked(api.playlists).mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    let resolve!: (value: Library) => void
+    vi.mocked(api.library).mockReturnValueOnce(new Promise((done) => { resolve = done }))
     usePlayer.setState({ playlistID: 'list', trackID: track.id, audioVersion: 1, position: 48, playing: true })
     const query = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={query}><App/></QueryClientProvider>)
@@ -205,7 +238,7 @@ describe('independent playback controls', () => {
     expect(usePlayer.getState().playing).toBe(true)
     expect(usePlayer.getState().position).toBe(48)
     audio.play.mockRejectedValueOnce(new DOMException('blocked', 'NotAllowedError'))
-    await act(async () => { resolve([{ id: 'list', name: 'list', isDefault: true, tracks: [track] }]) })
+    await act(async () => { resolve(asLibrary([{ id: 'list', name: 'list', isDefault: true, tracks: [track] }])) })
     await waitFor(() => expect(usePlayer.getState().playing).toBe(false))
     expect(audio.seek).toHaveBeenCalledWith(48)
     expect(usePlayer.getState().trackID).toBe(track.id)
@@ -238,27 +271,28 @@ describe('independent playback controls', () => {
   })
 
   it('removes stale random entries when a playlist refresh removes songs', async () => {
-    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'removed', title: 'Removed song' }] }])
+    vi.mocked(api.library).mockResolvedValueOnce(asLibrary([{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'removed', title: 'Removed song' }] }]))
     const query = await setup()
     act(() => {
       usePlayer.setState({ recovery: { song: 0, removed: 1, otherList: 2 } })
-      query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track] }])
+      setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track] }])
     })
     await waitFor(() => expect(usePlayer.getState().recovery).toEqual({ song: 0 }))
-    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [] }]) })
+    act(() => { setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [] }]) })
     await waitFor(() => expect(usePlayer.getState().trackID).toBeNull())
     expect(usePlayer.getState().playing).toBe(false)
     expect(usePlayer.getState().position).toBe(0)
     expect(usePlayer.getState().recovery).toEqual({})
   })
 
-  it('starts weighted random playback in the active playlist when no song is selected', async () => {
+  it('starts weighted random playback within enabled tags when no song is selected', async () => {
     const second = { ...track, id: 'second', title: 'Second', baseRandomWeight: 3, playbackStartSeconds: 7, audioVersion: 2, audioUrl: '/second?v=2' }
-    vi.mocked(api.playlists).mockResolvedValueOnce([
-      { id: 'other', name: 'Other playlist', isDefault: true, tracks: [{ ...track, id: 'outside', baseRandomWeight: 1000000 }] },
-      { id: 'list', name: 'Active playlist', isDefault: false, tracks: [track, second] },
-    ])
-    usePlayer.setState({ playlistID: 'list', trackID: null, mode: 'random', playing: false })
+    vi.mocked(api.library).mockResolvedValueOnce({
+      tracks: [{ ...track, tagIds: ['jp'] }, { ...second, tagIds: ['jp'] }, { ...track, id: 'outside', tagIds: ['other'], baseRandomWeight: 1000000 }],
+      tags: [{ id: 'jp', name: '日语' }, { id: 'other', name: '其他' }],
+      groups: [{ id: 'default', name: '默认标签组', isDefault: true, tagIds: ['_untagged','jp','other'] }],
+    })
+    usePlayer.setState({ playlistID: 'list', trackID: null, mode: 'random', playing: false, tagSelection: ['jp'] })
     const query = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={query}><App/></QueryClientProvider>)
     await screen.findByRole('button', { name: '设置 Second' })
@@ -279,11 +313,11 @@ describe('independent playback controls', () => {
   })
 
   it.each(['empty', 'repeat-one'] as const)('keeps play disabled without a selected song for %s', async (scenario) => {
-    vi.mocked(api.playlists).mockResolvedValueOnce([{ id: 'list', name: 'Test playlist', isDefault: true, tracks: scenario === 'empty' ? [] : [track] }])
+    vi.mocked(api.library).mockResolvedValueOnce(asLibrary([{ id: 'list', name: 'Test playlist', isDefault: true, tracks: scenario === 'empty' ? [] : [track] }]))
     usePlayer.setState({ playlistID: 'list', trackID: null, playing: false, mode: scenario === 'repeat-one' ? 'repeat-one' : 'random' })
     const query = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={query}><App/></QueryClientProvider>)
-    await screen.findByRole('button', { name: /Test playlist/ })
+    await screen.findByRole('navigation', { name: '标签组' })
     const toggle = screen.getByRole('button', { name: '播放' }) as HTMLButtonElement
     expect(toggle.disabled).toBe(true)
     fireEvent.click(toggle)
@@ -294,7 +328,7 @@ describe('independent playback controls', () => {
 
   it('prefers the original source when the server advertises one', async () => {
     const query = await setup()
-    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, originalAudioUrl: '/original', originalContentType: 'audio/flac' }] }]) })
+    act(() => { setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, originalAudioUrl: '/original', originalContentType: 'audio/flac' }] }]) })
     await waitFor(() => expect(audio.load).toHaveBeenCalledWith(track.audioUrl, { url: '/original', contentType: 'audio/flac' }))
   })
 
@@ -312,7 +346,7 @@ describe('independent playback controls', () => {
     const query = await setup()
     act(() => {
       usePlayer.setState({ mode: 'repeat-one' })
-      query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, playbackEndSeconds: 60 }] }])
+      setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, playbackEndSeconds: 60 }] }])
     })
     await waitFor(() => expect(document.querySelector<HTMLInputElement>('.controls input')!.max).toBe('60'))
     vi.clearAllMocks()
@@ -345,7 +379,7 @@ describe('independent playback controls', () => {
 
   it('applies edited song volume without seeking', async () => {
     const query = await setup()
-    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, volumeRatio: .5 }] }]) })
+    act(() => { setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, volumeRatio: .5 }] }]) })
     await waitFor(() => expect(audio.volume).toHaveBeenCalledWith(.5))
     expect(audio.seek).not.toHaveBeenCalled()
     expect(audio.play).not.toHaveBeenCalled()
@@ -354,7 +388,7 @@ describe('independent playback controls', () => {
 
   it('still resets progress when the audio version is replaced', async () => {
     const query = await setup()
-    act(() => { query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, audioVersion: 2, audioUrl: '/api/tracks/song/audio?v=2' }] }]) })
+    act(() => { setLibrary(query, [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [{ ...track, audioVersion: 2, audioUrl: '/api/tracks/song/audio?v=2' }] }]) })
     await waitFor(() => expect(audio.seek).toHaveBeenCalledWith(5))
     expect(audio.load).toHaveBeenCalledWith('/api/tracks/song/audio?v=2')
     expect(usePlayer.getState().audioVersion).toBe(2)

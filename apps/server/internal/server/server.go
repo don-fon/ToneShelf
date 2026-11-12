@@ -51,6 +51,14 @@ func (a *API) Handler() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(a.withCurrentUser)
 		r.Get("/api/current-user", a.currentUser)
+		r.Get("/api/library", a.library)
+		r.Post("/api/tags", a.saveTag)
+		r.Patch("/api/tags/{tagID}", a.saveTag)
+		r.Delete("/api/tags/{tagID}", a.deleteTag)
+		r.Post("/api/tag-groups", a.saveTagGroup)
+		r.Put("/api/tag-groups/{groupID}", a.saveTagGroup)
+		r.Delete("/api/tag-groups/{groupID}", a.deleteTagGroup)
+		r.Patch("/api/track-tags", a.setTrackTags)
 		r.Get("/api/playlists", a.playlists)
 		r.Post("/api/playlists", a.createPlaylist)
 		r.Patch("/api/playlists/{playlistID}", a.renamePlaylist)
@@ -243,21 +251,28 @@ func (a *API) restoreTrack(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) updateTrack(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Title                *string  `json:"title"`
-		Artist               *string  `json:"artist"`
-		BaseRandomWeight     float64  `json:"baseRandomWeight"`
-		PlaybackStartSeconds float64  `json:"playbackStartSeconds"`
-		PlaybackEndSeconds   *float64 `json:"playbackEndSeconds"`
-		VolumeRatio          float64  `json:"volumeRatio"`
-		Lyrics               string   `json:"lyrics"`
-		LyricsLayout         *string  `json:"lyricsLayout"`
-		LyricsPrimaryLine    *string  `json:"lyricsPrimaryLine"`
+		Title                *string   `json:"title"`
+		Artist               *string   `json:"artist"`
+		BaseRandomWeight     float64   `json:"baseRandomWeight"`
+		PlaybackStartSeconds float64   `json:"playbackStartSeconds"`
+		PlaybackEndSeconds   *float64  `json:"playbackEndSeconds"`
+		VolumeRatio          float64   `json:"volumeRatio"`
+		Lyrics               string    `json:"lyrics"`
+		LyricsLayout         *string   `json:"lyricsLayout"`
+		LyricsPrimaryLine    *string   `json:"lyricsPrimaryLine"`
+		TagIDs               *[]string `json:"tagIds"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	t, err := a.Store.UpdateTrack(r.Context(), chi.URLParam(r, "trackID"), in.BaseRandomWeight, in.PlaybackStartSeconds, in.PlaybackEndSeconds, in.VolumeRatio, in.Lyrics, in.Title, in.Artist, in.LyricsLayout, in.LyricsPrimaryLine)
+	var tagsJSON *string
+	if in.TagIDs != nil {
+		raw, _ := json.Marshal(*in.TagIDs)
+		text := string(raw)
+		tagsJSON = &text
+	}
+	t, err := a.Store.UpdateTrack(r.Context(), chi.URLParam(r, "trackID"), in.BaseRandomWeight, in.PlaybackStartSeconds, in.PlaybackEndSeconds, in.VolumeRatio, in.Lyrics, in.Title, in.Artist, in.LyricsLayout, in.LyricsPrimaryLine, tagsJSON)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

@@ -67,6 +67,9 @@ func (s *Store) SetAccount(ctx context.Context, userID, name, account string, cr
 			return err
 		}
 	}
+	if err = ensureDefaultTagGroupTx(ctx, tx, userID); err != nil {
+		return err
+	}
 	var configured bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM user_credentials WHERE user_id=? AND kind=?)`, userID, accountKind).Scan(&configured); err != nil {
 		return err

@@ -26,6 +26,9 @@ func (s *Store) EnsureUser(ctx context.Context, id, name, defaultPlaylist string
 	if _, err = tx.ExecContext(ctx, `INSERT INTO playlists(id,owner_user_id,name,is_default,created_at,updated_at) SELECT ?,?, ?,1,?,? WHERE NOT EXISTS(SELECT 1 FROM playlists WHERE owner_user_id=? AND is_default=1)`, defaultPlaylist, id, "默认歌单", now, now, id); err != nil {
 		return err
 	}
+	if err = ensureDefaultTagGroupTx(ctx, tx, id); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
