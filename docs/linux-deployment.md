@@ -74,3 +74,41 @@ sudo /opt/music-player/current/music-player account list --config /etc/music-pla
 5. 后续以目标服务器为写入来源，避免同时修改源库和目标库。
 
 日常备份包含整个数据目录与服务配置，备份文件应仅管理员可读，因为数据库包含账号校验值和会话信息。更新程序时，先备份数据，再放入新的版本目录，切换 `current` 并重启；保留旧版本。发生数据库迁移后，回滚不能只切换旧二进制，还需恢复与旧版本相匹配的数据备份。
+
+### 使用 Workbench 一键更新
+
+Windows 在仓库根目录运行：
+
+```powershell
+.\scripts\update.ps1 -InstanceId <实例ID>
+```
+
+实例 ID 使用 Workbench 查询结果中的 `instance_id`，不是公网 IP。地域默认为 `cn-hangzhou`；其他地域加 `-Region`，指定凭证 Profile 加 `-Profile`。Workbench 未在 PATH 中时使用 `-WorkbenchPath 'C:\工具目录\workbench.exe'`，不需要把凭据复制进仓库。命令使用 Workbench 的默认 root 免密通道；调用方式依据[官方 CLI 文档](https://help.aliyun.com/zh/ecs/user-guide/use-workbench-cli-to-manage-ecs-instances)。
+
+本机需要 Git、Python 3.10+、Node.js/npm、Go 及已完成凭证配置的 Workbench CLI。远端需要 Python 3.10+、systemd、GNU cp 和已有的 FFmpeg/ffprobe；按本文布局安装，`current` 必须是版本目录的符号链接，`webDir` 必须为 `/opt/music-player/current/web`，后端监听回环地址。脚本核对 systemd 的程序与配置路径；不支持 `MUSIC_*` 环境覆盖或 EnvironmentFile，避免备份和实际运行的数据目录不一致。不能用于首次安装或迁移音乐库，也不会修改 Nginx、证书、账号或服务器配置。
+
+仅构建并验证发布包、不连接 ECS：
+
+```powershell
+.\scripts\update.ps1 -PackageOnly
+```
+
+默认构建 Linux x64；ARM64/NAS 使用 `-Arch arm64`，服务器端会核对架构。Linux/macOS 开发机可使用同一入口的 Python 实现：
+
+```sh
+python3 scripts/update.py --instance-id <实例ID> --region cn-hangzhou
+python3 scripts/update.py --package-only --arch arm64
+```
+
+流程：
+
+1. 实际部署要求工作区干净；仅打包允许未提交改动。执行更新脚本测试、`npm ci`、前端测试/类型检查/构建、完整 Go 测试与 vet，再交叉编译服务器。
+2. 将可执行程序和 `web/` 打成 `.cache/releases/<版本>/release.tar.gz`，附逐文件 SHA-256 清单。不会打包本地歌曲、数据库、账号、配置或日志。
+3. 上传至远端独立的 `/var/tmp/toneshelf-update-<版本>/`；校验压缩包、清单、路径及 CPU 架构，准备版本目录。上传或校验失败不停止现有服务。Workbench 命令本身与返回 JSON 的远端 `exit_code` 都必须成功。
+4. 持有服务器更新锁，停止并确认服务完全退出，检查数据库完整性与外键。有未结束的上传/后台任务时取消更新并重启原服务；运行前先等任务完成。
+5. 对整个数据目录和配置做冷备份。默认数据目录的备份位于 `/var/lib/music-player-backups/<版本>/`，只有管理员可访问；其他数据目录在同级 `<目录名>-backups/`。备份完成标记为 `complete.json`，检查副本数据库；磁盘不足或备份失败不切换版本，并重启原服务。备份包含全部音频，需要足够空闲空间，停服时间取决于数据量与磁盘速度。
+6. 原子切换 `current`，启动新版，检查 `/api/health`、网页及匿名 `/api/current-user` 返回 401。程序启动可能自动迁移数据库。若启动或检查失败，停止新版并保留完整冷备份、旧版本与新版本，返回失败；不自动降级数据库，不自动切回旧程序。
+
+正常更新有短暂停服；浏览器可能需要刷新页面以加载新网页资源。脚本检查服务器本机应用，不把公网 DNS、Nginx 或 TLS 的状态等同于应用健康。版本目录、上传包和备份不自动删除，更新后可按需要保留、清理；备份中含登录凭据校验值和会话信息，不要公开下载。
+
+失败恢复前先查看脚本输出和 `journalctl -u music-player`。若新版已启动过，停止服务，使用 `complete.json` 中记录的路径将当前数据目录另存，然后完整恢复该备份的 `data/`（包括媒体、数据库及 WAL），保留文件所有权；恢复对应配置，并将 `current` 切回记录的 `previous`，再启动检查。不能在服务运行时覆盖数据库。连接中断时也先检查服务、版本链接及备份标记，不要盲目重复更新；不带 `complete.json` 的目录不是可恢复的完整备份。

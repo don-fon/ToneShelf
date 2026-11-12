@@ -609,6 +609,8 @@ Windows x64、Linux x64 和 Linux ARM64 必须分别准备匹配架构的 FFmpeg
 
 以上为完整发布目标。当前 Linux 部署使用独立的 `web/` 构建目录，显式通过 `webDir` 交给 Go 服务，FFmpeg/ffprobe 由系统软件包提供；已提供 systemd、HTTP/HTTPS Nginx 及 Let's Encrypt IP 证书续期示例，具体目录、迁移验证、备份及更新流程见 [Linux 部署与维护](linux-deployment.md)。
 
+日常更新由 `scripts/update.ps1` 包装跨平台 Python 构建入口，Workbench 仅承担文件上传和远端命令执行。发布包只包含服务器、网页及校验清单，Linux root 更新器核对文件和架构，使用文件锁串行更新；停服后完整冷备份再切换符号链接。更新前失败恢复原服务，新版启动后失败则停服保留备份，不能仅回退二进制来降级数据库。配置、媒体和凭据不从开发机覆盖；不修改代理和 TLS。具体约束与失败恢复见部署文档。
+
 Linux 发布必须：
 
 - 正确处理 `SIGTERM` 和 `SIGINT`，停止接收新请求并尽力结束或回收任务。

@@ -118,6 +118,8 @@ npm run verify
 - [初步技术设计](docs/technical-design.md)
 - [Linux 部署与维护](docs/linux-deployment.md)
 
+已有 Linux 服务器可用 Workbench 更新：`.\scripts\update.ps1 -InstanceId <实例ID>`。先本地验证打包可用 `-PackageOnly`，详见部署文档；脚本会停服冷备份，不覆盖服务器上的音乐库与配置。
+
 ## 初版范围摘要
 
 - 网页客户端同时面向手机和电脑浏览器，访问同一个服务器音乐库。
