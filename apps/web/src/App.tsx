@@ -12,6 +12,7 @@ import { FloatingLyrics } from './FloatingLyrics'
 import { LyricsEditor } from './LyricsEditor'
 import { WebAudioEngine } from './platform/audio'
 import { usePlaybackShortcuts } from './platform/keyboard'
+import { useMediaSession } from './platform/media-session'
 import { ShortcutHelp } from './ShortcutHelp'
 import { watchSessionLifecycle } from './platform/session'
 import { flushPlayerSession, usePlayer } from './player-store'
@@ -159,6 +160,11 @@ export function App({ onLogout, logoutBusy = false }: { onLogout?: () => void; l
   }
 
   const togglePlayback = () => { if (current) player.setPlaying(!player.playing); else if (player.mode === 'random') next() }
+  useMediaSession({
+    track: current, playing: player.playing, audio: engine.element(),
+    getPosition: () => engine.position(),
+    play: () => player.setPlaying(true), pause: () => player.setPlaying(false), next, seek,
+  })
   usePlaybackShortcuts({
     enabled: !isLoading && !error,
     togglePlayback, next,

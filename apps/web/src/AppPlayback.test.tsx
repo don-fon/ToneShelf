@@ -46,6 +46,7 @@ afterEach(() => {
   sessionStorage.clear()
   vi.clearAllMocks()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 async function setup(playing = true) {
@@ -61,6 +62,40 @@ async function setup(playing = true) {
 }
 
 describe('independent playback controls', () => {
+  it('connects system media controls to playback, interval seeking and weighted next-track selection', async () => {
+    const handlers = new Map<MediaSessionAction, MediaSessionActionHandler | null>()
+    const session = { metadata: null as MediaMetadata | null, playbackState: 'none', setPositionState: vi.fn(), setActionHandler: (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => handlers.set(action, handler) }
+    vi.stubGlobal('navigator', { mediaSession: session })
+    vi.stubGlobal('MediaMetadata', class { constructor(data: MediaMetadataInit) { Object.assign(this, data) } })
+    const query = await setup()
+    expect(session.metadata).toMatchObject({ title: track.title })
+    act(() => { handlers.get('pause')!({ action: 'pause' }) })
+    expect(usePlayer.getState().playing).toBe(false)
+    expect(usePlayer.getState().position).toBe(48.8)
+    expect(audio.pause).toHaveBeenCalledOnce()
+    act(() => { handlers.get('play')!({ action: 'play' }) })
+    expect(usePlayer.getState().playing).toBe(true)
+    expect(audio.play).toHaveBeenCalledOnce()
+    expect(audio.seek).not.toHaveBeenCalled()
+    act(() => { handlers.get('seekto')!({ action: 'seekto', seekTime: 0 }) })
+    expect(audio.seek).toHaveBeenLastCalledWith(5)
+    expect(usePlayer.getState().position).toBe(5)
+    act(() => {
+      query.setQueryData(['playlists'], [{ id: 'list', name: 'Test playlist', isDefault: true, tracks: [track, { ...track, id: 'second', title: 'Second', audioUrl: '/second', playbackStartSeconds: 7 }] }])
+    })
+    await screen.findByRole('button', { name: '设置 Second' })
+    act(() => { handlers.get('nexttrack')!({ action: 'nexttrack' }) })
+    expect(usePlayer.getState().trackID).toBe('second')
+    expect(usePlayer.getState().recovery.second).toBe(0)
+    expect(audio.seek).toHaveBeenLastCalledWith(7)
+    expect(session.metadata).toMatchObject({ title: 'Second' })
+    expect(handlers.get('previoustrack')).toBeNull()
+    cleanup()
+    expect(session.metadata).toBeNull()
+    expect(session.playbackState).toBe('none')
+    expect([...handlers.values()].every((handler) => handler === null)).toBe(true)
+  })
+
   it('toggles playback with Space on the focused song row without restarting it or double handling the key', async () => {
     await setup()
     const row = screen.getByRole('group', { name: '歌曲 Playback test' })
