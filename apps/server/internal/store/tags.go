@@ -55,7 +55,7 @@ func (s *Store) Library(ctx context.Context) (Library, error) {
 		return out, err
 	}
 	defer tx.Rollback()
-	tracks, err := s.queryTracksWith(ctx, tx, `SELECT t.id,t.title,t.artist,t.album,t.content_type,t.size_bytes,t.duration_seconds,t.base_random_weight,t.playback_start_seconds,t.playback_end_seconds,t.volume_ratio,t.lyrics,t.lyrics_layout,t.lyrics_primary_line,t.original_path,t.playable_path,t.audio_version,t.original_content_type,t.playback_index_version,t.duration_probe_version,t.file_name,t.created_at,t.cover_path,t.cover_version FROM tracks t WHERE t.owner_user_id=? AND t.deleted_at IS NULL ORDER BY t.created_at,t.id`, currentuser.ID(ctx))
+	tracks, err := s.queryTracksWith(ctx, tx, `SELECT t.id,t.title,t.artist,t.album,t.content_type,t.size_bytes,t.duration_seconds,t.base_random_weight,t.playback_start_seconds,t.playback_end_seconds,t.volume_ratio,t.lyrics,t.lyrics_layout,t.lyrics_primary_line,t.original_path,t.playable_path,t.audio_version,t.original_content_type,t.playback_index_version,t.duration_probe_version,t.file_name,t.created_at,t.cover_path,t.cover_version,t.note FROM tracks t WHERE t.owner_user_id=? AND t.deleted_at IS NULL ORDER BY t.created_at,t.id`, currentuser.ID(ctx))
 	if err != nil {
 		return out, err
 	}

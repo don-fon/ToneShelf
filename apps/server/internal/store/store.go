@@ -29,6 +29,7 @@ type Store struct {
 }
 
 type Track struct {
+	Note                 string   `json:"note"`
 	TagIDs               []string `json:"tagIds"`
 	CoverVersion         int64    `json:"-"`
 	CoverURL             string   `json:"coverUrl,omitempty"`
@@ -182,7 +183,7 @@ func (s *Store) tracksForPlaylist(ctx context.Context, playlistID string) ([]Tra
 	if err := currentuser.Require(ctx); err != nil {
 		return nil, err
 	}
-	return s.queryTracks(ctx, `SELECT t.id,t.title,t.artist,t.album,t.content_type,t.size_bytes,t.duration_seconds,t.base_random_weight,t.playback_start_seconds,t.playback_end_seconds,t.volume_ratio,t.lyrics,t.lyrics_layout,t.lyrics_primary_line,t.original_path,t.playable_path,t.audio_version,t.original_content_type,t.playback_index_version,t.duration_probe_version,t.file_name,t.created_at,t.cover_path,t.cover_version
+	return s.queryTracks(ctx, `SELECT t.id,t.title,t.artist,t.album,t.content_type,t.size_bytes,t.duration_seconds,t.base_random_weight,t.playback_start_seconds,t.playback_end_seconds,t.volume_ratio,t.lyrics,t.lyrics_layout,t.lyrics_primary_line,t.original_path,t.playable_path,t.audio_version,t.original_content_type,t.playback_index_version,t.duration_probe_version,t.file_name,t.created_at,t.cover_path,t.cover_version,t.note
 		FROM playlist_items pi JOIN tracks t ON t.id=pi.track_id JOIN playlists p ON p.id=pi.playlist_id
 		WHERE pi.playlist_id=? AND t.deleted_at IS NULL AND t.owner_user_id=? AND p.owner_user_id=? ORDER BY pi.position`, playlistID, currentuser.ID(ctx), currentuser.ID(ctx))
 }
@@ -205,7 +206,7 @@ func (s *Store) queryTracksWith(ctx context.Context, source trackQueryer, query 
 	for rows.Next() {
 		var t Track
 		var end sql.NullFloat64
-		if err = rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.ContentType, &t.SizeBytes, &t.DurationSeconds, &t.BaseRandomWeight, &t.PlaybackStartSeconds, &end, &t.VolumeRatio, &t.Lyrics, &t.LyricsLayout, &t.LyricsPrimaryLine, &t.OriginalPath, &t.PlayablePath, &t.AudioVersion, &t.OriginalContentType, &t.PlaybackIndexVersion, &t.DurationProbeVersion, &t.FileName, &t.UploadedAt, &t.CoverPath, &t.CoverVersion); err != nil {
+		if err = rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.ContentType, &t.SizeBytes, &t.DurationSeconds, &t.BaseRandomWeight, &t.PlaybackStartSeconds, &end, &t.VolumeRatio, &t.Lyrics, &t.LyricsLayout, &t.LyricsPrimaryLine, &t.OriginalPath, &t.PlayablePath, &t.AudioVersion, &t.OriginalContentType, &t.PlaybackIndexVersion, &t.DurationProbeVersion, &t.FileName, &t.UploadedAt, &t.CoverPath, &t.CoverVersion, &t.Note); err != nil {
 			return nil, err
 		}
 		if end.Valid {
@@ -233,7 +234,7 @@ func (s *Store) Track(ctx context.Context, id string) (Track, error) {
 	}
 	var t Track
 	var end sql.NullFloat64
-	err := s.db.QueryRowContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,cover_path,cover_version FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, id, currentuser.ID(ctx)).Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.ContentType, &t.SizeBytes, &t.DurationSeconds, &t.BaseRandomWeight, &t.PlaybackStartSeconds, &end, &t.VolumeRatio, &t.Lyrics, &t.LyricsLayout, &t.LyricsPrimaryLine, &t.OriginalPath, &t.PlayablePath, &t.AudioVersion, &t.OriginalContentType, &t.PlaybackIndexVersion, &t.DurationProbeVersion, &t.FileName, &t.UploadedAt, &t.CoverPath, &t.CoverVersion)
+	err := s.db.QueryRowContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,cover_path,cover_version,note FROM tracks WHERE id=? AND owner_user_id=? AND deleted_at IS NULL`, id, currentuser.ID(ctx)).Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.ContentType, &t.SizeBytes, &t.DurationSeconds, &t.BaseRandomWeight, &t.PlaybackStartSeconds, &end, &t.VolumeRatio, &t.Lyrics, &t.LyricsLayout, &t.LyricsPrimaryLine, &t.OriginalPath, &t.PlayablePath, &t.AudioVersion, &t.OriginalContentType, &t.PlaybackIndexVersion, &t.DurationProbeVersion, &t.FileName, &t.UploadedAt, &t.CoverPath, &t.CoverVersion, &t.Note)
 	if end.Valid {
 		t.PlaybackEndSeconds = &end.Float64
 	}
@@ -328,6 +329,10 @@ func (s *Store) UpdateTrack(ctx context.Context, id string, weight, start float6
 	if len(optional) > 1 {
 		artist = optional[1]
 	}
+	var note *string
+	if len(optional) > 5 {
+		note = optional[5]
+	}
 	var layout, primary *string
 	if len(optional) > 2 {
 		layout = optional[2]
@@ -388,7 +393,7 @@ func (s *Store) UpdateTrack(ctx context.Context, id string, weight, start float6
 			return Track{}, err
 		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE tracks SET title=COALESCE(?,title),artist=COALESCE(?,artist),custom_title=CASE WHEN ? IS NULL THEN custom_title ELSE 1 END,custom_artist=CASE WHEN ? IS NULL THEN custom_artist ELSE 1 END,base_random_weight=?,playback_start_seconds=?,playback_end_seconds=?,volume_ratio=?,lyrics=?,lyrics_layout=COALESCE(?,lyrics_layout),lyrics_primary_line=COALESCE(?,lyrics_primary_line),updated_at=? WHERE id=? AND owner_user_id=?`, title, artist, title, artist, weight, start, endValue, volume, ensureLyricsOffset(lyrics), layout, primary, time.Now().UTC().Format(time.RFC3339Nano), id, currentuser.ID(ctx))
+	_, err = tx.ExecContext(ctx, `UPDATE tracks SET note=COALESCE(?,note),title=COALESCE(?,title),artist=COALESCE(?,artist),custom_title=CASE WHEN ? IS NULL THEN custom_title ELSE 1 END,custom_artist=CASE WHEN ? IS NULL THEN custom_artist ELSE 1 END,base_random_weight=?,playback_start_seconds=?,playback_end_seconds=?,volume_ratio=?,lyrics=?,lyrics_layout=COALESCE(?,lyrics_layout),lyrics_primary_line=COALESCE(?,lyrics_primary_line),updated_at=? WHERE id=? AND owner_user_id=?`, note, title, artist, title, artist, weight, start, endValue, volume, ensureLyricsOffset(lyrics), layout, primary, time.Now().UTC().Format(time.RFC3339Nano), id, currentuser.ID(ctx))
 	if err != nil {
 		return Track{}, err
 	}
@@ -561,7 +566,7 @@ func (s *Store) Trash(ctx context.Context) ([]Track, error) {
 	if err := currentuser.Require(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,deleted_at,purge_eligible_at,purge_error,cover_path,cover_version FROM tracks WHERE owner_user_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`, currentuser.ID(ctx))
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,deleted_at,purge_eligible_at,purge_error,cover_path,cover_version,note FROM tracks WHERE owner_user_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`, currentuser.ID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -759,7 +764,7 @@ func (s *Store) PurgeCandidates(ctx context.Context, now time.Time) ([]Track, er
 	if err := currentuser.Require(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,deleted_at,purge_eligible_at,purge_error,cover_path,cover_version FROM tracks WHERE owner_user_id=? AND deleted_at IS NOT NULL AND purge_eligible_at<=? ORDER BY purge_eligible_at`, currentuser.ID(ctx), now.UTC().Format(time.RFC3339Nano))
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,artist,album,content_type,size_bytes,duration_seconds,base_random_weight,playback_start_seconds,playback_end_seconds,volume_ratio,lyrics,lyrics_layout,lyrics_primary_line,original_path,playable_path,audio_version,original_content_type,playback_index_version,duration_probe_version,file_name,created_at,deleted_at,purge_eligible_at,purge_error,cover_path,cover_version,note FROM tracks WHERE owner_user_id=? AND deleted_at IS NOT NULL AND purge_eligible_at<=? ORDER BY purge_eligible_at`, currentuser.ID(ctx), now.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
@@ -856,7 +861,7 @@ func (s *Store) scanTrashTrack(row scanner) (Track, error) {
 	var track Track
 	var end sql.NullFloat64
 	var deleted, eligible sql.NullString
-	err := row.Scan(&track.ID, &track.Title, &track.Artist, &track.Album, &track.ContentType, &track.SizeBytes, &track.DurationSeconds, &track.BaseRandomWeight, &track.PlaybackStartSeconds, &end, &track.VolumeRatio, &track.Lyrics, &track.LyricsLayout, &track.LyricsPrimaryLine, &track.OriginalPath, &track.PlayablePath, &track.AudioVersion, &track.OriginalContentType, &track.PlaybackIndexVersion, &track.DurationProbeVersion, &track.FileName, &track.UploadedAt, &deleted, &eligible, &track.PurgeError, &track.CoverPath, &track.CoverVersion)
+	err := row.Scan(&track.ID, &track.Title, &track.Artist, &track.Album, &track.ContentType, &track.SizeBytes, &track.DurationSeconds, &track.BaseRandomWeight, &track.PlaybackStartSeconds, &end, &track.VolumeRatio, &track.Lyrics, &track.LyricsLayout, &track.LyricsPrimaryLine, &track.OriginalPath, &track.PlayablePath, &track.AudioVersion, &track.OriginalContentType, &track.PlaybackIndexVersion, &track.DurationProbeVersion, &track.FileName, &track.UploadedAt, &deleted, &eligible, &track.PurgeError, &track.CoverPath, &track.CoverVersion, &track.Note)
 	if end.Valid {
 		track.PlaybackEndSeconds = &end.Float64
 	}

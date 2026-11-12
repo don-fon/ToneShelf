@@ -29,6 +29,14 @@ it('does not let a delayed unauthorized response clear a newer login session', a
 })
 
 describe('playlist API normalization', () => {
+  it('sends song notes including an explicit empty value', async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
+    vi.stubGlobal('fetch', fetch)
+    for (const note of ['第一行\n第二行 🎵', '']) {
+      await api.updateTrack({ id: 'song', note } as Track)
+      expect(JSON.parse(fetch.mock.calls.at(-1)![1].body)).toMatchObject({ note })
+    }
+  })
   it('moves a song through one request containing the destination playlist', async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 })
     vi.stubGlobal('fetch', fetch)

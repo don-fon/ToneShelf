@@ -50,6 +50,7 @@ export const api = {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
       title: track.title,
       artist: track.artist,
+      note: track.note,
       baseRandomWeight: track.baseRandomWeight,
       playbackStartSeconds: track.playbackStartSeconds,
       playbackEndSeconds: track.playbackEndSeconds,

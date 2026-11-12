@@ -54,6 +54,24 @@ const renderApp = () => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); usePlayer.setState(usePlayer.getInitialState(), true); vi.clearAllMocks(); vi.mocked(api.addTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.moveTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.deleteTrack).mockReset().mockResolvedValue(undefined); vi.mocked(api.library).mockReset().mockResolvedValue(asLibrary([{ id: 'default', name: '默认歌单', isDefault: true, tracks: [] }])) })
 
 describe('music library lifecycle', () => {
+  it('edits multiline song notes, discards cancelled drafts and supports clearing', async () => {
+    mockLibrary([{id:'default',name:'',isDefault:true,tracks:[{...track,note:'原备注'}]}])
+    renderApp()
+    fireEvent.click(await screen.findByRole('button',{name:'设置 World is Mine'}))
+    fireEvent.change(screen.getByLabelText('备注'),{target:{value:'未保存'}})
+    fireEvent.click(screen.getByRole('button',{name:'取消'}))
+    expect(api.updateTrack).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button',{name:'设置 World is Mine'}))
+    expect((screen.getByLabelText('备注') as HTMLTextAreaElement).value).toBe('原备注')
+    fireEvent.change(screen.getByLabelText('备注'),{target:{value:'第一行\n第二行 🎵'}})
+    fireEvent.click(screen.getByRole('button',{name:'保存'}))
+    await waitFor(()=>expect(api.updateTrack).toHaveBeenLastCalledWith(expect.objectContaining({note:'第一行\n第二行 🎵'})))
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'歌曲设置'})).toBeNull())
+    fireEvent.click(screen.getByRole('button',{name:'设置 World is Mine'}))
+    fireEvent.change(screen.getByLabelText('备注'),{target:{value:''}})
+    fireEvent.click(screen.getByRole('button',{name:'保存'}))
+    await waitFor(()=>expect(api.updateTrack).toHaveBeenLastCalledWith(expect.objectContaining({note:''})))
+  })
   it('uses the top tag area for narrow-screen bulk actions and restores it after clearing selection', async () => {
     vi.stubGlobal('matchMedia',vi.fn(() => ({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()})))
     mockLibrary([{id:'default',name:'',isDefault:true,tracks:[track,{...track,id:'second',title:'Second'}]}])

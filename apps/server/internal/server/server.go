@@ -251,6 +251,7 @@ func (a *API) restoreTrack(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) updateTrack(w http.ResponseWriter, r *http.Request) {
 	var in struct {
+		Note                 *string   `json:"note"`
 		Title                *string   `json:"title"`
 		Artist               *string   `json:"artist"`
 		BaseRandomWeight     float64   `json:"baseRandomWeight"`
@@ -272,7 +273,7 @@ func (a *API) updateTrack(w http.ResponseWriter, r *http.Request) {
 		text := string(raw)
 		tagsJSON = &text
 	}
-	t, err := a.Store.UpdateTrack(r.Context(), chi.URLParam(r, "trackID"), in.BaseRandomWeight, in.PlaybackStartSeconds, in.PlaybackEndSeconds, in.VolumeRatio, in.Lyrics, in.Title, in.Artist, in.LyricsLayout, in.LyricsPrimaryLine, tagsJSON)
+	t, err := a.Store.UpdateTrack(r.Context(), chi.URLParam(r, "trackID"), in.BaseRandomWeight, in.PlaybackStartSeconds, in.PlaybackEndSeconds, in.VolumeRatio, in.Lyrics, in.Title, in.Artist, in.LyricsLayout, in.LyricsPrimaryLine, tagsJSON, in.Note)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

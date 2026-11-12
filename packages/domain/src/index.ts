@@ -2,6 +2,7 @@ export type LyricsLayout = 'timestamp' | 'separate'
 export type LyricsPrimaryLine = 'first' | 'last'
 
 export interface Track {
+  note?: string
   tagIds?: string[]
   id: string
   title: string
