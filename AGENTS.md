@@ -2,7 +2,7 @@
 
 ## Project
 
-This repository contains a server-hosted, multi-device music player service. Local Windows execution is only the initial development and debugging setup. The service must remain deployable to Windows x64, Linux x64, Linux ARM64, and NAS environments. Phone and desktop browsers access the same server-managed music library and play audio on their own devices.
+This repository contains ToneShelf, a server-hosted, multi-device music player service. Local Windows execution is only the initial development and debugging setup. The service must remain deployable to Windows x64, Linux x64, Linux ARM64, and NAS environments. Phone and desktop browsers access the same server-managed music library and play audio on their own devices.
 
 The repository is documentation-only at present. The planned implementation is a Go server plus a React/TypeScript web client, with platform-neutral client logic reserved for a future React Native client.
 
