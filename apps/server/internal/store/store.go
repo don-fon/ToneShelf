@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"strings"
 	"time"
 
@@ -655,6 +656,43 @@ func (s *Store) replaceTrackTx(ctx context.Context, tx *sql.Tx, id string, repla
 			return errors.New("音频已被另一任务替换，请重新上传")
 		}
 	}
+	if oldCover != "" && replacement.CoverPath != oldCover {
+		// Preserve the current artwork; any newly extracted cover is a discarded candidate.
+		coverSize := int64(-1)
+		for _, file := range oldFiles {
+			if file.Path == oldCover {
+				coverSize = file.SizeBytes
+				break
+			}
+		}
+		if coverSize < 0 {
+			coverPath, err := s.resolvedPath(oldCover)
+			if err != nil {
+				return err
+			}
+			coverInfo, err := os.Stat(coverPath)
+			if err != nil {
+				return err
+			}
+			coverSize = coverInfo.Size()
+		}
+		replacement.SizeBytes += coverSize
+		if replacement.CoverPath != "" {
+			candidatePath, err := s.resolvedPath(replacement.CoverPath)
+			if err != nil {
+				return err
+			}
+			candidateInfo, err := os.Stat(candidatePath)
+			if err != nil {
+				return err
+			}
+			replacement.SizeBytes -= candidateInfo.Size()
+			if _, err = tx.ExecContext(ctx, `INSERT INTO pending_file_deletions(path,size_bytes,created_at) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET size_bytes=excluded.size_bytes,last_error=''`, replacement.CoverPath, candidateInfo.Size(), nowText()); err != nil {
+				return err
+			}
+		}
+		replacement.CoverPath = oldCover
+	}
 	endValue := any(nil)
 	if start >= replacement.DurationSeconds {
 		start = 0
@@ -669,7 +707,7 @@ func (s *Store) replaceTrackTx(ctx context.Context, tx *sql.Tx, id string, repla
 			return err
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE tracks SET cover_path=?,cover_scan_version=1,cover_version=cover_version+1,title=CASE WHEN custom_title=1 THEN title ELSE ? END,artist=CASE WHEN custom_artist=1 THEN artist ELSE ? END,album=?,file_name=?,original_content_type=?,playback_index_version=?,duration_probe_version=?,original_path=?,playable_path=?,content_type=?,size_bytes=?,duration_seconds=?,playback_start_seconds=?,playback_end_seconds=?,audio_version=audio_version+1,updated_at=? WHERE id=? AND owner_user_id=? AND original_path=? AND playable_path=?`, replacement.CoverPath, replacement.Title, replacement.Artist, replacement.Album, replacement.FileName, replacement.OriginalContentType, replacement.PlaybackIndexVersion, replacement.DurationProbeVersion, replacement.OriginalPath, replacement.PlayablePath, replacement.ContentType, replacement.SizeBytes, replacement.DurationSeconds, start, endValue, nowText(), id, currentuser.ID(ctx), oldOriginal, oldPlayable)
+	result, err := tx.ExecContext(ctx, `UPDATE tracks SET cover_path=?,cover_scan_version=1,cover_version=cover_version+1,artist=CASE WHEN custom_artist=1 THEN artist ELSE ? END,album=?,file_name=?,original_content_type=?,playback_index_version=?,duration_probe_version=?,original_path=?,playable_path=?,content_type=?,size_bytes=?,duration_seconds=?,playback_start_seconds=?,playback_end_seconds=?,audio_version=audio_version+1,updated_at=? WHERE id=? AND owner_user_id=? AND original_path=? AND playable_path=?`, replacement.CoverPath, replacement.Artist, replacement.Album, replacement.FileName, replacement.OriginalContentType, replacement.PlaybackIndexVersion, replacement.DurationProbeVersion, replacement.OriginalPath, replacement.PlayablePath, replacement.ContentType, replacement.SizeBytes, replacement.DurationSeconds, start, endValue, nowText(), id, currentuser.ID(ctx), oldOriginal, oldPlayable)
 	if err = requireOne(result, err); err != nil {
 		return err
 	}

@@ -71,8 +71,11 @@ func TestCoverAccessReplacementAndTrashLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	api.Maintain(ctx)
-	get(track.ID, 404)
-	for _, path := range []string{original, cover} {
+	get(track.ID, 200)
+	if _, err = os.Stat(cover); err != nil {
+		t.Fatal("retained cover removed", err)
+	}
+	for _, path := range []string{original} {
 		if _, err = os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("old version retained: %s %v", path, err)
 		}

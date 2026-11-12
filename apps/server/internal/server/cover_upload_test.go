@@ -98,11 +98,12 @@ func TestCoverUploadAndReplacementFlow(t *testing.T) {
 			}
 			old = got
 		} else {
-			if got.CoverPath != "" || got.CoverURL != "" {
-				t.Fatal("old cover survived replacement")
+			if got.CoverPath != old.CoverPath || got.CoverURL == "" || got.Title != old.Title {
+				t.Fatal("replacement lost original cover or title")
 			}
-			if _, err = os.Stat(old.CoverPath); !os.IsNotExist(err) {
-				t.Fatal("old cover file retained", err)
+			coverInfo, err := os.Stat(old.CoverPath)
+			if err != nil || got.SizeBytes != info.Size()+coverInfo.Size() {
+				t.Fatal("retained cover quota mismatch", err)
 			}
 		}
 	}

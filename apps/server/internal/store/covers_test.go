@@ -71,14 +71,14 @@ func TestLegacyCoverBackfillRestartQuotaAndReplacementRace(t *testing.T) {
 	}
 	old := []PendingFile{{Path: "original", SizeBytes: 10}, {Path: "cover.jpg", SizeBytes: 5}}
 	got, err = s.ReplaceTrack(ctx, track.ID, NewTrack{OriginalPath: "new", PlayablePath: "new", DurationSeconds: 2, SizeBytes: 8}, old)
-	if err != nil || got.CoverURL != "" || got.CoverPath != "" {
+	if err != nil || got.CoverURL == "" || got.CoverPath != "cover.jpg" || got.SizeBytes != 13 {
 		t.Fatalf("replace=%+v %v", got, err)
 	}
 	if err = s.CompleteCover(ctx, jobs[0], "stale.jpg", 5); err == nil {
 		t.Fatal("stale completion changed replaced song")
 	}
 	pending, err := s.PendingFiles(ctx)
-	if err != nil || len(pending) != 2 {
+	if err != nil || len(pending) != 1 || pending[0].Path != "original" {
 		t.Fatalf("pending=%v %v", pending, err)
 	}
 	legacy, err = s.CoverMaintenanceTracks(ctx)

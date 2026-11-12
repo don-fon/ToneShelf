@@ -45,7 +45,7 @@ export function useSongSettingsSave(onSaved: () => void) {
         await api.updateTrack(track)
         savedSettings.current = track
       }
-      // Audio replacement also extracts a cover, so apply the selected cover afterwards.
+      // Apply an explicitly chosen cover after the audio task has completed.
       try {
         if (audioFile) await applyFile('audio', track.id, audioFile)
         if (coverFile) await applyFile('cover', track.id, coverFile)
