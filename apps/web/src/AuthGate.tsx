@@ -46,6 +46,7 @@ export function AuthGate() {
     finally { setBusy(false) }
   }
   const logout = async () => {
+    if (busy || !window.confirm('确定退出登录？')) return
     setBusy(true); setError('')
     try { await api.logout(); clear() }
     catch (reason) { setError(reason instanceof Error ? reason.message : '退出失败，请重试') }

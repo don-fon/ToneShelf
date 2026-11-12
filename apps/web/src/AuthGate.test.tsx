@@ -12,7 +12,7 @@ vi.mock('./api', () => ({
   APIError: class extends Error { constructor(message: string, readonly status: number) { super(message) } },
   api: { currentUser: vi.fn(), login: vi.fn(), logout: vi.fn() },
 }))
-afterEach(() => { cleanup(); vi.resetAllMocks() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.resetAllMocks() })
 const first = { id: 'first', isDefault: true }
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -39,6 +39,7 @@ it('requires login and uses a visible account field with no registration or pass
 })
 
 it('restores identity before playback and clears private queries on logout or a 401', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.mocked(api.currentUser).mockResolvedValue(first)
   vi.mocked(api.logout).mockResolvedValue(undefined)
   const client = setup()
@@ -56,6 +57,7 @@ it('restores identity before playback and clears private queries on logout or a 
 })
 
 it('keeps the session visible if logout fails and does not interpret network errors as login success', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.mocked(api.currentUser).mockRejectedValueOnce(new Error('offline'))
   const client = setup()
   expect((await screen.findByRole('alert')).textContent).toContain('无法连接服务器')
@@ -68,6 +70,18 @@ it('keeps the session visible if logout fails and does not interpret network err
   expect((await screen.findByRole('alert')).textContent).toContain('退出失败')
   expect(screen.getByText('受保护音乐库')).toBeTruthy()
   await waitFor(() => expect(client.getQueryCache().getAll()).toHaveLength(1))
+})
+
+it('retains the player and private queries when logout confirmation is cancelled', async () => {
+  vi.mocked(api.currentUser).mockResolvedValue(first)
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  const client = setup()
+  await screen.findByText('受保护音乐库')
+  fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
+  expect(confirm).toHaveBeenCalledWith('确定退出登录？')
+  expect(api.logout).not.toHaveBeenCalled()
+  expect(screen.getByText('受保护音乐库')).toBeTruthy()
+  expect(client.getQueryCache().getAll()).toHaveLength(1)
 })
 
 it('does not recheck identity when returning to the page', async () => {
