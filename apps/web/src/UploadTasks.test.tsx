@@ -14,6 +14,33 @@ const renderTasks = (playlistID?: string) => {
 }
 
 describe('upload task UI', () => {
+  it('closes outside or with Escape without losing successful records, and restores focus on Escape', async () => {
+    const job: UploadJob = { id: 'upload', fileName: 'song.flac', state: 'processing', reservedBytes: 0, createdAt: '' }
+    vi.mocked(api.jobs).mockResolvedValue([job])
+    const { client } = renderTasks()
+    await screen.findByText('处理中')
+    await act(async () => { client.setQueryData(['jobs'], [{ ...job, state: 'succeeded' }]) })
+    await screen.findByText('成功')
+    const details = document.querySelector('.upload-tasks') as HTMLDetailsElement
+    const open = () => { details.open = true; fireEvent(details, new Event('toggle')) }
+    open()
+    fireEvent.pointerDown(screen.getByText('song.flac'))
+    expect(details.open).toBe(true)
+    fireEvent.pointerDown(document.body)
+    expect(details.open).toBe(false)
+    expect(screen.getByText('成功')).toBeTruthy()
+    open()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(details.open).toBe(false)
+    expect(document.activeElement).toBe(screen.getByLabelText('上传任务'))
+    open()
+    expect(screen.getByText('song.flac')).toBeTruthy()
+    details.open = false
+    fireEvent(details, new Event('toggle'))
+    details.open = true // Native summary can open before its asynchronous toggle event.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(details.open).toBe(false)
+  })
   it('hides legacy cancellations while keeping real failure diagnostics', async () => {
     vi.mocked(api.jobs).mockResolvedValue([
       { id: 'cancelled', fileName: 'cancelled.mp3', targetTrackId: 'song', state: 'failed', error: '已取消', reservedBytes: 100, createdAt: '' },

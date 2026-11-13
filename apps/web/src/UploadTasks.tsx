@@ -27,6 +27,28 @@ export function UploadTasks({ playlistID, anchor, lyricsView = false }: { playli
   const [dismissed, setDismissed] = useState<string[]>([])
   const [ignoredError, setIgnoredError] = useState<Error | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const activity = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const close = () => {
+      const details = activity.current?.querySelector('details')
+      if (details) details.open = false
+      setExpanded(false)
+    }
+    const outside = (event: PointerEvent) => {
+      if (activity.current?.querySelector('details')?.open && event.target instanceof Node && !activity.current.contains(event.target)) close()
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !activity.current?.querySelector('details')?.open) return
+      close()
+      activity.current?.querySelector('summary')?.focus()
+    }
+    document.addEventListener('pointerdown', outside)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', outside)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [])
   const [local, setLocal] = useState<LocalUpload[]>([])
   const [deciding, setDeciding] = useState<string[]>([])
   const [decisionError, setDecisionError] = useState('')
@@ -137,7 +159,7 @@ export function UploadTasks({ playlistID, anchor, lyricsView = false }: { playli
     {checkError && conflicts.length === 0 && <div className="upload-check-notice error" role="alert">{checkError}<button type="button" onClick={() => setCheckError('')} aria-label="关闭检查提示">×</button></div>}
     {conflicts.length > 0 && <div className="modal"><form className="upload-confirm" role="dialog" aria-modal="true" aria-labelledby="upload-confirm-title" onSubmit={(event) => { event.preventDefault(); void choose(true) }}><h2 id="upload-confirm-title">发现同名歌曲</h2><p>已存在“{conflicts[0].conflictTitle}”，是否覆盖音频？</p><p className="upload-confirm-note">歌词、播放设置和歌单关系将保留。</p>{checkError && <p className="error" role="alert">{checkError}</p>}<div className="upload-confirm-actions"><button type="button" disabled={confirming} onClick={() => void choose(false)}>取消</button><button className="primary" disabled={confirming}>覆盖</button></div></form></div>}
     </>, document.body)}
-    {(pending.length > 0 || visibleJobs.length > 0 || queryError) && createPortal(<div className={`upload-activity ${destination === document.body ? 'floating' : ''}`}><details className="upload-tasks" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+    {(pending.length > 0 || visibleJobs.length > 0 || queryError) && createPortal(<div ref={activity} className={`upload-activity ${destination === document.body ? 'floating' : ''}`}><details className="upload-tasks" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
       <summary aria-label="上传任务" title={running ? '上传中' : failed || queryError ? '上传失败' : '上传完成'}><svg className="upload-task-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={!running && !failed && !queryError ? 'M5 12l4 4L19 6' : 'M12 16V3m-4 4 4-4 4 4M4 15v5h16v-5'}/></svg><b className="upload-task-label">{running ? '上传中' : failed || queryError ? '上传失败' : '上传完成'}</b>{running > 0 && <span>{running}</span>}</summary>
       <div className="upload-task-content">
       {queryError && <p className="error">无法获取任务状态：{queryError.message}</p>}
