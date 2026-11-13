@@ -94,14 +94,14 @@ button.tag-chip:hover{border-color:#d86e43}
 
 .tag-group-picker .tag-group-nav{max-height:32dvh;overflow-y:auto}
 .sidebar-tools{position:relative}
-.sidebar-upload-activity-anchor{position:absolute;right:0;top:18px;width:36px;z-index:8}
+.sidebar-upload-activity-anchor{position:absolute;left:0;right:0;top:18px;height:36px;z-index:8;pointer-events:none}
 .sidebar-upload-activity-anchor:empty{display:none}
 .sidebar-upload-activity-anchor .upload-activity,.sidebar-upload-activity-anchor .upload-tasks{position:static}
-.sidebar-upload-activity-anchor .upload-activity summary{width:36px;min-height:36px;padding:0;border:0;background:transparent;color:#aaa29a;position:relative}
+.sidebar-upload-activity-anchor .upload-activity summary{width:36px;min-height:36px;margin-left:auto;padding:0;border:0;background:transparent;color:#aaa29a;position:relative;pointer-events:auto}
 .sidebar-upload-activity-anchor .upload-activity summary:hover{background:#3a3531;color:#eee8df}
 .sidebar-upload-activity-anchor .upload-task-label{display:none}
 .sidebar-upload-activity-anchor .upload-activity summary>span{position:absolute;right:-3px;top:-3px;min-width:16px;padding:1px 4px;border-radius:8px;background:#9c5c40;color:white;font-size:10px;text-align:center}
-.sidebar-upload-activity-anchor .upload-task-content{left:0;right:auto;top:auto;bottom:calc(100% + 8px);width:min(360px,calc(100vw - 32px))}
+.sidebar-upload-activity-anchor .upload-activity .upload-task-content{left:0;right:auto;top:auto;bottom:calc(100% + 8px);width:min(360px,calc(100vw - 32px));pointer-events:auto}
 @media(max-width:800px){.tag-panel .tag-panel-secondary .sidebar-upload-button,.sidebar-tools .sidebar-upload-activity-anchor{display:none}}
 
 .tag-group-inline-panel{display:grid;gap:10px;min-width:0;border-top:1px solid #ffffff12;padding-top:12px;color:#bdb0a5;font-size:12px}
