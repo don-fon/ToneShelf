@@ -22,6 +22,29 @@ Nginx 转发到回环地址，账号校验由 Go 服务统一执行，音频 Ran
 
 仅在明确选择未加密公网访问后使用该 HTTP 模板。它需要安全组放行 TCP 80，不能加密账号和会话，浏览器也不能通过这个 HTTP 地址使用悬浮歌词；使用 HTTPS 时，应单独配置证书与 HTTPS 站点。保持应用后端端口只在回环地址监听。
 
+### Let's Encrypt 域名证书
+
+域名的 A 记录须指向服务器公网 IP；存在 AAAA 记录时，对应 IPv6 也必须能访问该站点。域名解析与备案是独立步骤，备案通过不会自动添加 DNS 记录。
+
+域名站点使用 [域名 HTTPS 模板](../scripts/deploy/nginx-domain-https.conf)，把 `SERVER_NAME` 替换为实际域名，安装到独立的 `/etc/nginx/sites-available/music-player-domain` 并链接至 `sites-enabled/`；保留原 IP 站点，不增加第二个 default_server。申请前先只启用模板的 80 端口 server，保留 ACME 校验 location，普通路径暂返回 503，不要提前启用引用未签发证书的 443 server。
+
+通过 `nginx -t` 并重载后，在 ACME 目录放置临时文件，确认公网域名可直接读取，再先模拟签发、后正式签发：
+
+```sh
+sudo /opt/certbot/bin/certbot certonly --dry-run --non-interactive --agree-tos --register-unsafely-without-email --webroot -w /var/lib/letsencrypt --cert-name music-player-domain -d SERVER_NAME
+sudo /opt/certbot/bin/certbot certonly --non-interactive --agree-tos --register-unsafely-without-email --webroot -w /var/lib/letsencrypt --cert-name music-player-domain -d SERVER_NAME
+```
+
+域名证书不使用 IP 证书的 `--required-profile shortlived`。签发后启用完整模板，先备份站点配置，执行 `nginx -t` 成功才重载，失败恢复原配置。播放器服务和数据库无需重启或改动。
+
+已有 `music-player-certbot-renew.timer`、renew service 和 Nginx deploy hook 会续期所有已配置证书，无需新增定时器。验收域名证书及主机名匹配、HTTP 到同域名 HTTPS 的跳转、网页、健康接口、匿名访问拒绝，并执行续期模拟：
+
+```sh
+sudo /opt/certbot/bin/certbot renew --cert-name music-player-domain --dry-run --run-deploy-hooks --no-random-sleep-on-renew
+```
+
+换成域名访问后，原 IP 地址上的登录 Cookie 和浏览器播放会话不会跨域搬迁，需要在域名重新登录。音乐、歌词、标签和备注仍使用同一服务器数据库；IP 入口可继续沿用独立的 IP 证书与站点。
+
 ### Let's Encrypt IP 证书
 
 公网 IPv4 地址可直接申请 Let's Encrypt 的 `shortlived` 证书，无需域名，有效期约 6 天。使用 Certbot 5.4 或更新版本的 webroot 模式，签发和续期都不停止 Nginx；系统软件源版本不满足时，可按 [Certbot 官方 pip 安装说明](https://certbot.eff.org/instructions?os=pip&ws=other) 安装到独立 `/opt/certbot` 环境。功能及版本要求见 [Let's Encrypt 官方说明](https://letsencrypt.org/2026/03/11/shorter-certs-certbot.html)。
